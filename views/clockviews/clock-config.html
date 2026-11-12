@@ -1,30 +1,30 @@
 <div id="config-form">
-    <h2>Clock view configurator</h2>
+    <h2><%= locals.translate('Clock view configurator') %></h2>
     <form action="#">
         <p>
-            <label for="bgcolor">Background type</label>
+            <label for="bgcolor"><%= locals.translate('Background type') %></label>
             <select name="bgcolor" id="bgcolor">
-                <option value="c" selected="selected">Color</option>
-                <option value="b">Black</option>
+                <option value="c" selected="selected"><%= locals.translate('Color') %></option>
+                <option value="b"><%= locals.translate('Black') %></option>
             </select>
         </p>
         <p>
-            <label for="sgage">Show SGV age</label>
+            <label for="sgage"><%= locals.translate('Show SGV age') %></label>
             <select name="sgage" id="sgage">
-                <option value="y" selected="selected">Always</option>
-                <option value="n">Only after threshold</option>
+                <option value="y" selected="selected"><%= locals.translate('Always') %></option>
+                <option value="n"><%= locals.translate('Only after threshold') %></option>
             </select>
         </p>
-        <p>SGV age threshold: <input type="number" class="threshold" id="threshold" name="threshold" min="1" max="99" value="10"> minutes</p>
-        <p><input type="button" class="elmt" id="cfg_nl" name="nl" value="Add line break"></p>
-        <p><input type="button" class="elmt" id="cfg_sg" name="sg" value="Add SGV"> Size: <input type="number" class="size" id="cfg_sg_size" name="cfg_sg_size" min="1" max="99" value="40"></p>
-        <p><input type="button" class="elmt" id="cfg_ag" name="ag" value="Add SGV age"> Size: <input type="number" class="size" id="cfg_ag_size" name="cfg_ag_size" min="1" max="99" value="6"></p>
-        <p><input type="button" class="elmt" id="cfg_dt" name="dt" value="Add SGV delta"> Size: <input type="number" class="size" id="cfg_dt_size" name="cfg_dt_size" min="1" max="99" value="14"></p>
-        <p><input type="button" class="elmt" id="cfg_ar" name="ar" value="Add trend arrow"> Size: <input type="number" class="size" id="cfg_ar_size" name="cfg_ar_size" min="1" max="99" value="30"></p>
-        <p><input type="button" class="elmt" id="cfg_tm" name="tm" value="Add time"> Size: <input type="number" class="size" id="cfg_tm_size" name="cfg_tm_size" min="1" max="99" value="10"></p>
-        <p><input type="button" class="elmt" id="cfg_em" name="em" value="Add emoji"> Size: <input type="number" class="size" id="cfg_em_size" name="cfg_em_size" min="1" max="99" value="40"></p>
-        <p><input type="button" class="undo" id="cfg_undo" name="undo" value="Remove last element"></p>
-        <a id="clocklink" target=”_blank” href="/clock/cy10">Open my clock view!</a>
+        <p><%= locals.translate('SGV age threshold:') %> <input type="number" class="threshold" id="threshold" name="threshold" min="1" max="99" value="10"> <%= locals.translate('minutes') %></p>
+        <p><input type="button" class="elmt" id="cfg_nl" name="nl" value="<%= locals.translate('Add line break') %>"></p>
+        <p><input type="button" class="elmt" id="cfg_sg" name="sg" value="<%= locals.translate('Add SGV') %>"> <%= locals.translate('Size:') %> <input type="number" class="size" id="cfg_sg_size" name="cfg_sg_size" min="1" max="99" value="40"></p>
+        <p><input type="button" class="elmt" id="cfg_ag" name="ag" value="<%= locals.translate('Add SGV age') %>"> <%= locals.translate('Size:') %> <input type="number" class="size" id="cfg_ag_size" name="cfg_ag_size" min="1" max="99" value="6"></p>
+        <p><input type="button" class="elmt" id="cfg_dt" name="dt" value="<%= locals.translate('Add SGV delta') %>"> <%= locals.translate('Size:') %> <input type="number" class="size" id="cfg_dt_size" name="cfg_dt_size" min="1" max="99" value="14"></p>
+        <p><input type="button" class="elmt" id="cfg_ar" name="ar" value="<%= locals.translate('Add trend arrow') %>"> <%= locals.translate('Size:') %> <input type="number" class="size" id="cfg_ar_size" name="cfg_ar_size" min="1" max="99" value="30"></p>
+        <p><input type="button" class="elmt" id="cfg_tm" name="tm" value="<%= locals.translate('Add time') %>"> <%= locals.translate('Size:') %> <input type="number" class="size" id="cfg_tm_size" name="cfg_tm_size" min="1" max="99" value="10"></p>
+        <p><input type="button" class="elmt" id="cfg_em" name="em" value="<%= locals.translate('Add emoji') %>"> <%= locals.translate('Size:') %> <input type="number" class="size" id="cfg_em_size" name="cfg_em_size" min="1" max="99" value="40"></p>
+        <p><input type="button" class="undo" id="cfg_undo" name="undo" value="<%= locals.translate('Remove last element') %>"></p>
+        <a id="clocklink" target=”_blank” href="/clock/cy10"><%= locals.translate('Open my clock view!') %></a>
         <div id="facename">cy10</div>
     </form>
 </div>
