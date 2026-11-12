@@ -1,0 +1,5 @@
+# Panel runtime data
+data/
+*.db
+*.db-wal
+*.db-shm
