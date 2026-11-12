@@ -26,7 +26,7 @@ describe('settings', function ( ) {
     settings.alarmTimeagoWarnMins.should.equal(15);
     settings.alarmTimeagoUrgent.should.equal(true);
     settings.alarmTimeagoUrgentMins.should.equal(30);
-    settings.language.should.equal('en');
+    settings.language.should.equal('zh_cn');
     settings.showPlugins.should.equal('dbsize');
     settings.insecureUseHttp.should.equal(false);
     settings.secureHstsHeader.should.equal(true);
