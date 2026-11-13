@@ -244,6 +244,19 @@ function find_treatment(array $user, string $id): ?array
 }
 
 /**
+ * The live Nightscout copy of a treatment, for write paths.
+ *
+ * Editing or deleting from the mirrored copy would send back fields that
+ * changed after the last sync (another device, a note edited elsewhere) and
+ * could silently revert them. A Nightscout failure propagates instead of
+ * being mistaken for "not found", so the caller answers 502, not 403.
+ */
+function find_treatment_live(string $id): ?array
+{
+    return $id === '' ? null : nsClient()->treatmentById($id);
+}
+
+/**
  * Nightscout's write endpoints answer with either one record or a one-item
  * array; normalise to a single document.
  *
@@ -746,7 +759,7 @@ try {
             Auth::assertCsrf($_POST['csrf'] ?? null);
             $client = nsClient();
             $id = (string)($_POST['_id'] ?? '');
-            $existing = $id !== '' ? find_treatment($user, $id) : null;
+            $existing = find_treatment_live($id);
             if ($existing === null || !self_owned($existing, $user)) {
                 http_response_code(403);
                 view('treatments', [
@@ -802,7 +815,7 @@ try {
             $user = Auth::requireUser();
             Auth::assertCsrf($_POST['csrf'] ?? null);
             $id = (string)($_POST['_id'] ?? '');
-            $existing = $id !== '' ? find_treatment($user, $id) : null;
+            $existing = find_treatment_live($id);
             if ($existing !== null && self_owned($existing, $user)) {
                 nsClient()->deleteTreatment($id);
                 Mirror::forgetTreatment((int)$user['id'], $id);
