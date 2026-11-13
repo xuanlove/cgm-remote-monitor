@@ -105,7 +105,7 @@ final class Auth
     public static function userToken(array $user): string
     {
         if (empty($user['ns_access_token_enc'])) {
-            throw new \RuntimeException('This account has no Nightscout token bound.');
+            throw new \RuntimeException(Lang::t('err.noToken'));
         }
         return Db::decrypt((string)$user['ns_access_token_enc']);
     }

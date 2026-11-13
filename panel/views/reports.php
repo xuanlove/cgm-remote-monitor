@@ -1,90 +1,118 @@
 <?php
 /** @var array $stats */
-$pct = $stats['percent'];
 $hasData = ($stats['count'] ?? 0) > 0;
 ?>
-<h1>统计报告 <span class="hint" style="font-size:13px;">· device = <?= htmlspecialchars($user['username']) ?> · <?= htmlspecialchars($from) ?> ~ <?= htmlspecialchars($to) ?></span></h1>
+<h1><?= t('rep.title') ?> <span class="hint" style="font-size:13px;">· <?= t('rep.subtitle', [
+    'name' => htmlspecialchars($user['username']),
+    'from' => htmlspecialchars($from),
+    'to' => htmlspecialchars($to),
+]) ?></span></h1>
 
 <div class="card">
   <form method="get" action="/reports" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-    <strong>统计区间：</strong>
+    <strong><?= t('rep.range') ?></strong>
     <?php foreach ([7, 14, 30, 90] as $option): ?>
       <a href="/reports?days=<?= $option ?>"
          style="padding:4px 12px;border-radius:6px;text-decoration:none;<?= $days === $option ? 'background:var(--accent);color:#fff;' : 'border:1px solid var(--line);' ?>">
-        近 <?= $option ?> 天
+        <?= t('rep.lastDays', ['n' => $option]) ?>
       </a>
     <?php endforeach; ?>
-    <span class="hint">共 <?= (int)$stats['count'] ?> 条读数<?php if ($stats['coverage'] !== null): ?> · 数据覆盖 <?= $stats['coverage'] ?>%<?php endif; ?></span>
+    <span class="hint"><?= t('rep.readings', ['n' => (int)$stats['count']]) ?><?php if ($stats['coverage'] !== null): ?> · <?= t('rep.coverage', ['n' => $stats['coverage']]) ?><?php endif; ?></span>
   </form>
   <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
-    <span class="hint">导出当前区间：</span>
-    <a href="/export/entries.csv?days=<?= $days ?>" class="hint">血糖 CSV</a>
-    <a href="/export/entries.json?days=<?= $days ?>" class="hint">血糖 JSON</a>
-    <a href="/export/treatments.csv?days=<?= $days ?>" class="hint">治疗 CSV</a>
+    <span class="hint"><?= t('rep.export') ?></span>
+    <a href="/export/entries.csv?days=<?= $days ?>" class="hint"><?= t('rep.exportCsv') ?></a>
+    <a href="/export/entries.json?days=<?= $days ?>" class="hint"><?= t('rep.exportJson') ?></a>
+    <a href="/export/treatments.csv?days=<?= $days ?>" class="hint"><?= t('rep.exportTreatments') ?></a>
   </div>
 </div>
 
 <?php if (!$hasData): ?>
-  <div class="card"><p class="hint">所选区间内没有血糖数据。请先在「填写数据」录入，或确认 CGM 上传器的设备名是 <?= htmlspecialchars($user['username']) ?>。</p></div>
+  <div class="card"><p class="hint"><?= t('rep.noData', ['name' => htmlspecialchars($user['username'])]) ?></p></div>
 <?php else: ?>
 
 <div class="card">
   <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:14px;">
     <div>
-      <div class="hint">目标范围内 TIR（3.9–10.0）</div>
+      <div class="hint"><?= t('rep.tir') ?></div>
       <div style="font-size:26px;font-weight:600;color:#3fb27f;"><?= $stats['tir'] ?>%</div>
     </div>
     <div>
-      <div class="hint">平均血糖</div>
+      <div class="hint"><?= t('rep.mean') ?></div>
       <div style="font-size:26px;font-weight:600;"><?= $stats['mean'] ?> <span style="font-size:14px;" class="hint">mmol/L</span></div>
     </div>
     <div>
-      <div class="hint">GMI（预估糖化）</div>
+      <div class="hint"><?= t('rep.gmi') ?></div>
       <div style="font-size:26px;font-weight:600;"><?= $stats['gmi'] ?? '-' ?><span style="font-size:14px;" class="hint">%</span></div>
     </div>
     <div>
-      <div class="hint">变异系数 CV</div>
+      <div class="hint"><?= t('rep.cv') ?></div>
       <div style="font-size:26px;font-weight:600;"><?= $stats['cv'] ?? '-' ?><span style="font-size:14px;" class="hint">%</span></div>
     </div>
   </div>
   <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:14px;margin-top:16px;">
     <div>
-      <div class="hint">低于范围 TBR</div>
+      <div class="hint"><?= t('rep.tbr') ?></div>
       <div style="font-size:18px;color:#e05a5a;"><?= $stats['tbr'] ?>%</div>
-      <div class="hint">其中 &lt;3.0：<?= $stats['tbr2'] ?>%</div>
+      <div class="hint"><?= t('rep.tbr2', ['n' => $stats['tbr2']]) ?></div>
     </div>
     <div>
-      <div class="hint">高于范围 TAR</div>
+      <div class="hint"><?= t('rep.tar') ?></div>
       <div style="font-size:18px;color:#e0a05a;"><?= $stats['tar'] ?>%</div>
-      <div class="hint">其中 &gt;13.9：<?= $stats['tar2'] ?>%</div>
+      <div class="hint"><?= t('rep.tar2', ['n' => $stats['tar2']]) ?></div>
     </div>
     <div>
-      <div class="hint">低血糖事件（≥15 分钟）</div>
-      <div style="font-size:18px;"><?= $stats['lowEvents']['events'] ?> 次</div>
-      <div class="hint">累计 <?= $stats['lowEvents']['minutes'] ?> 分钟 · 最长 <?= $stats['lowEvents']['longest'] ?> 分钟</div>
+      <div class="hint"><?= t('rep.lowEvents') ?></div>
+      <div style="font-size:18px;"><?= t('rep.lowEventsCount', ['n' => $stats['lowEvents']['events']]) ?></div>
+      <div class="hint"><?= t('rep.lowEventsDetail', [
+          'minutes' => $stats['lowEvents']['minutes'],
+          'longest' => $stats['lowEvents']['longest'],
+      ]) ?></div>
     </div>
     <div>
-      <div class="hint">落在你的目标范围</div>
+      <div class="hint"><?= t('rep.targetHit') ?></div>
       <div style="font-size:18px;"><?= $stats['target']['percent'] ?>%</div>
-      <div class="hint"><?= $stats['target']['low'] ?> ~ <?= $stats['target']['high'] ?> mmol/L（你的 Profile）</div>
+      <div class="hint"><?= t('rep.targetRange', [
+          'low' => $stats['target']['low'],
+          'high' => $stats['target']['high'],
+      ]) ?></div>
     </div>
   </div>
 </div>
 
 <div class="card">
-  <h1 style="font-size:16px;">血糖分布</h1>
+  <h1 style="font-size:16px;"><?= t('rep.distribution') ?></h1>
   <div id="distribution" style="width:100%;height:320px;"></div>
 </div>
 
 <div class="card">
-  <h1 style="font-size:16px;">时间占比（TIR / TAR / TBR）</h1>
+  <h1 style="font-size:16px;"><?= t('rep.tirChart') ?></h1>
   <div id="tirChart" style="width:100%;height:320px;"></div>
-  <p class="hint">参考阈值：&lt;3.0 极低 · 3.0–3.9 偏低 · 3.9–10.0 目标范围 · 10.0–13.9 偏高 · &gt;13.9 极高。中位数 <?= $stats['median'] ?>、标准差 <?= $stats['std'] ?>、最低 <?= $stats['min'] ?>、最高 <?= $stats['max'] ?> mmol/L。</p>
+  <p class="hint"><?= t('rep.thresholdsNote', [
+      'median' => $stats['median'],
+      'std' => $stats['std'],
+      'min' => $stats['min'],
+      'max' => $stats['max'],
+  ]) ?></p>
 </div>
 
 <script src="/vendor/echarts.min.js"></script>
 <script>
 const STATS = <?= json_encode($stats, JSON_UNESCAPED_UNICODE) ?>;
+const I18N = <?= \NightPanel\Lang::js([
+    'rep.share',
+    'rep.percentage',
+    'bucket.veryLow',
+    'bucket.low',
+    'bucket.inRange',
+    'bucket.high',
+    'bucket.veryHigh',
+    'seg.below',
+    'seg.inRange',
+    'seg.above',
+    'rep.lowEventsCount',
+]) ?>;
+const LOCALE = <?= json_encode(\NightPanel\Lang::htmlLang()) ?>;
 
 function themeColors () {
   const light = document.documentElement.classList.contains('light');
@@ -94,11 +122,11 @@ function themeColors () {
 }
 
 const BUCKETS = [
-  { key: 'veryLow',  label: '<3.0 极低',      color: '#b53a3a' },
-  { key: 'low',      label: '3.0–3.9 偏低',   color: '#e05a5a' },
-  { key: 'inRange',  label: '3.9–10.0 目标',  color: '#3fb27f' },
-  { key: 'high',     label: '10.0–13.9 偏高', color: '#e0a05a' },
-  { key: 'veryHigh', label: '>13.9 极高',     color: '#c07d2a' }
+  { key: 'veryLow',  label: I18N['bucket.veryLow'],  color: '#b53a3a' },
+  { key: 'low',      label: I18N['bucket.low'],      color: '#e05a5a' },
+  { key: 'inRange',  label: I18N['bucket.inRange'],  color: '#3fb27f' },
+  { key: 'high',     label: I18N['bucket.high'],     color: '#e0a05a' },
+  { key: 'veryHigh', label: I18N['bucket.veryHigh'], color: '#c07d2a' }
 ];
 
 const distribution = echarts.init(document.getElementById('distribution'));
@@ -119,7 +147,7 @@ function render () {
       axisPointer: { type: 'shadow' },
       formatter: p => {
         const i = p[0].dataIndex;
-        return '<b>' + BUCKETS[i].label + '</b><br/>占比 ' + STATS.percent[BUCKETS[i].key] + '%<br/>读数 ' + STATS.buckets[BUCKETS[i].key] + ' 条';
+        return '<b>' + BUCKETS[i].label + '</b><br/>' + I18N['rep.share'].replace(':n', STATS.percent[BUCKETS[i].key]);
       }
     },
     xAxis: {
@@ -146,9 +174,9 @@ function render () {
   }), true);
 
   const segments = [
-    { name: '低于范围', value: STATS.tbr, color: '#e05a5a' },
-    { name: '目标范围', value: STATS.tir, color: '#3fb27f' },
-    { name: '高于范围', value: STATS.tar, color: '#e0a05a' }
+    { name: I18N['seg.below'], value: STATS.tbr, color: '#e05a5a' },
+    { name: I18N['seg.inRange'], value: STATS.tir, color: '#3fb27f' },
+    { name: I18N['seg.above'], value: STATS.tar, color: '#e0a05a' }
   ];
 
   tirChart.setOption({

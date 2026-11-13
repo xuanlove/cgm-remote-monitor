@@ -11,47 +11,47 @@ namespace NightPanel;
  */
 final class TreatmentTypes
 {
-    /** Field name => [kind, label, unit, min, max, step] */
+    /** Field name => [kind, label key, unit, min, max, step] */
     public static function fields(): array
     {
         return [
-            'glucose' => ['number', '血糖', 'mg/dL', 10, 600, '1'],
-            'carbs' => ['number', '碳水', 'g', 0, 500, '1'],
-            'insulin' => ['number', '胰岛素', 'U', 0, 100, '0.05'],
-            'duration' => ['number', '时长', '分钟', 0, 1440, '1'],
-            'absolute' => ['number', '临时基础率', 'U/h', 0, 15, '0.05'],
-            'percent' => ['number', '临时基础率百分比', '%', -100, 500, '1'],
-            'targetTop' => ['number', '目标上限', 'mg/dL', 40, 400, '1'],
-            'targetBottom' => ['number', '目标下限', 'mg/dL', 40, 400, '1'],
-            'profile' => ['text', '目标方案名', '', 0, 0, ''],
-            'notes' => ['text', '备注', '', 0, 0, ''],
+            'glucose' => ['number', 'field.glucose', 'mg/dL', 10, 600, '1'],
+            'carbs' => ['number', 'field.carbs', 'g', 0, 500, '1'],
+            'insulin' => ['number', 'field.insulin', 'U', 0, 100, '0.05'],
+            'duration' => ['number', 'field.duration', 'min', 0, 1440, '1'],
+            'absolute' => ['number', 'field.absolute', 'U/h', 0, 15, '0.05'],
+            'percent' => ['number', 'field.percent', '%', -100, 500, '1'],
+            'targetTop' => ['number', 'field.targetTop', 'mg/dL', 40, 400, '1'],
+            'targetBottom' => ['number', 'field.targetBottom', 'mg/dL', 40, 400, '1'],
+            'profile' => ['text', 'field.profile', '', 0, 0, ''],
+            'notes' => ['text', 'field.notes', '', 0, 0, ''],
         ];
     }
 
-    /** eventType => [label, fields used, group] */
+    /** eventType => [label key, fields used, group] */
     public static function types(): array
     {
         return [
-            'Meal Bolus' => ['正餐大剂量', ['glucose', 'carbs', 'insulin', 'notes'], 'bolus'],
-            'Snack Bolus' => ['加餐大剂量', ['glucose', 'carbs', 'insulin', 'notes'], 'bolus'],
-            'Correction Bolus' => ['纠正大剂量', ['glucose', 'insulin', 'notes'], 'bolus'],
-            'Combo Bolus' => ['双波大剂量', ['glucose', 'carbs', 'insulin', 'duration', 'notes'], 'bolus'],
-            'Carb Correction' => ['碳水修正', ['glucose', 'carbs', 'notes'], 'bolus'],
-            'BG Check' => ['测量血糖', ['glucose', 'notes'], 'monitor'],
-            'Note' => ['备注', ['notes'], 'monitor'],
-            'Announcement' => ['公告', ['notes'], 'monitor'],
-            'Question' => ['提问', ['notes'], 'monitor'],
-            'Exercise' => ['运动', ['duration', 'notes'], 'monitor'],
-            'Temp Basal' => ['临时基础率', ['absolute', 'percent', 'duration', 'notes'], 'temp'],
-            'Temp Target' => ['临时目标', ['targetTop', 'targetBottom', 'duration', 'notes'], 'temp'],
-            'Profile Switch' => ['切换目标方案', ['profile', 'duration', 'notes'], 'temp'],
-            'Site Change' => ['更换输注部位', ['notes'], 'care'],
-            'Sensor Start' => ['传感器启动', ['notes'], 'care'],
-            'Sensor Change' => ['更换传感器', ['notes'], 'care'],
-            'Insulin Change' => ['更换胰岛素', ['notes'], 'care'],
-            'Pump Battery Change' => ['更换泵电池', ['notes'], 'care'],
-            'Pump Suspend' => ['暂停泵', ['notes'], 'care'],
-            'Pump Resume' => ['恢复泵', ['notes'], 'care'],
+            'Meal Bolus' => ['type.mealBolus', ['glucose', 'carbs', 'insulin', 'notes'], 'bolus'],
+            'Snack Bolus' => ['type.snackBolus', ['glucose', 'carbs', 'insulin', 'notes'], 'bolus'],
+            'Correction Bolus' => ['type.correctionBolus', ['glucose', 'insulin', 'notes'], 'bolus'],
+            'Combo Bolus' => ['type.comboBolus', ['glucose', 'carbs', 'insulin', 'duration', 'notes'], 'bolus'],
+            'Carb Correction' => ['type.carbCorrection', ['glucose', 'carbs', 'notes'], 'bolus'],
+            'BG Check' => ['type.bgCheck', ['glucose', 'notes'], 'monitor'],
+            'Note' => ['type.note', ['notes'], 'monitor'],
+            'Announcement' => ['type.announcement', ['notes'], 'monitor'],
+            'Question' => ['type.question', ['notes'], 'monitor'],
+            'Exercise' => ['type.exercise', ['duration', 'notes'], 'monitor'],
+            'Temp Basal' => ['type.tempBasal', ['absolute', 'percent', 'duration', 'notes'], 'temp'],
+            'Temp Target' => ['type.tempTarget', ['targetTop', 'targetBottom', 'duration', 'notes'], 'temp'],
+            'Profile Switch' => ['type.profileSwitch', ['profile', 'duration', 'notes'], 'temp'],
+            'Site Change' => ['type.siteChange', ['notes'], 'care'],
+            'Sensor Start' => ['type.sensorStart', ['notes'], 'care'],
+            'Sensor Change' => ['type.sensorChange', ['notes'], 'care'],
+            'Insulin Change' => ['type.insulinChange', ['notes'], 'care'],
+            'Pump Battery Change' => ['type.pumpBatteryChange', ['notes'], 'care'],
+            'Pump Suspend' => ['type.pumpSuspend', ['notes'], 'care'],
+            'Pump Resume' => ['type.pumpResume', ['notes'], 'care'],
         ];
     }
 
@@ -89,11 +89,15 @@ final class TreatmentTypes
             }
             if ($def[0] === 'number') {
                 if (!is_numeric($raw)) {
-                    throw new \InvalidArgumentException('「' . $def[1] . '」必须是数字');
+                    throw new \InvalidArgumentException(Lang::t('val.number', ['field' => Lang::t($def[1])]));
                 }
                 $value = (float)$raw;
                 if ($value < $def[3] || $value > $def[4]) {
-                    throw new \InvalidArgumentException('「' . $def[1] . '」需在 ' . $def[3] . ' ~ ' . $def[4] . ' 之间');
+                    throw new \InvalidArgumentException(Lang::t('val.range', [
+                        'field' => Lang::t($def[1]),
+                        'min' => $def[3],
+                        'max' => $def[4],
+                    ]));
                 }
                 $record[$name] = $value;
             } else {

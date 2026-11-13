@@ -1,48 +1,85 @@
-<h1>血糖趋势 <span class="hint" style="font-size:13px;">· 归属：device = <?= htmlspecialchars($user['username']) ?> · 来自你的 Profile 档案</span></h1>
+<h1><?= t('dash.title') ?> <span class="hint" style="font-size:13px;">· <?= t('dash.owner', ['name' => htmlspecialchars($user['username'])]) ?></span></h1>
 
 <div id="alertBanner" style="display:none;padding:10px 16px;border-radius:10px;margin-bottom:16px;font-weight:600;"></div>
 
 <div class="card">
   <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
     <span style="font-size:26px;font-weight:600;" id="latestSgv">--</span>
-    <span style="font-size:20px;" id="latestDir" title="趋势"></span>
+    <span style="font-size:20px;" id="latestDir"></span>
     <span class="hint" id="latestDelta"></span>
     <span style="flex:1;"></span>
-    <span class="hint" id="liveState" title="实时连接状态">● 连接中</span>
-    <span class="hint" id="chipIob" title="体内胰岛素活性">IOB -</span>
-    <span class="hint" id="chipCob" title="活性碳水">COB -</span>
-    <span class="hint" id="chipBattery" title="上传器电量">🔋 -</span>
-    <a href="/settings/alerts" class="hint">提醒设置</a>
+    <span class="hint" id="liveState"><?= t('dash.live.connecting') ?></span>
+    <span class="hint" id="chipIob"><?= t('dash.chip.iob', ['value' => '-']) ?></span>
+    <span class="hint" id="chipCob"><?= t('dash.chip.cob', ['value' => '-']) ?></span>
+    <span class="hint" id="chipBattery"><?= t('dash.chip.battery', ['value' => '-']) ?></span>
+    <a href="/settings/alerts" class="hint"><?= t('dash.alertsLink') ?></a>
   </div>
   <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
-    <strong>时间窗：</strong>
+    <strong><?= t('dash.window') ?></strong>
     <select id="hours" onchange="loadAll()">
-      <option value="3">最近 3 小时</option>
-      <option value="6" selected>最近 6 小时</option>
-      <option value="12">最近 12 小时</option>
-      <option value="24">最近 24 小时</option>
+      <?php foreach ([3, 6, 12, 24] as $h): ?>
+        <option value="<?= $h ?>" <?= $h === 6 ? 'selected' : '' ?>><?= t('dash.lastHours', ['n' => $h]) ?></option>
+      <?php endforeach; ?>
     </select>
-    <strong>日期回看：</strong>
+    <strong><?= t('dash.historyDate') ?></strong>
     <input type="date" id="historyDate" onchange="loadAll()" style="width:auto;">
-    <button type="button" id="backToLive" style="margin:0;padding:4px 12px;display:none;" onclick="backToLive()">回到实时</button>
-    <label style="display:inline-flex;align-items:center;gap:4px;margin:0;"><input type="checkbox" id="smooth" onchange="loadAll()" style="width:auto;"> 3 点平滑</label>
+    <button type="button" id="backToLive" style="margin:0;padding:4px 12px;display:none;" onclick="backToLive()"><?= t('dash.backToLive') ?></button>
+    <label style="display:inline-flex;align-items:center;gap:4px;margin:0;"><input type="checkbox" id="smooth" onchange="loadAll()" style="width:auto;"> <?= t('dash.smooth') ?></label>
     <span id="updated" class="hint"></span>
     <span id="chartMsg" class="msg-bad" style="display:none;"></span>
   </div>
   <div id="chart" style="width:100%;height:420px;"></div>
-  <p class="hint">参考线：3.9 / 6.1 mmol/L（空腹默认）；若你在「我的 Profile」中设置了目标范围，则以你自己的档案为准。空心方块为校准血糖（mbg）。选择日期回看历史，勾选平滑可降噪。</p>
+  <p class="hint"><?= t('dash.reference') ?></p>
 </div>
 
 <div class="card">
-  <h1 style="font-size:16px;">我的治疗记录（最近 100 条）</h1>
+  <h1 style="font-size:16px;"><?= t('dash.treatmentsTitle') ?></h1>
   <table id="treatments">
-    <thead><tr><th>时间</th><th>类型</th><th>血糖</th><th>碳水</th><th>胰岛素</th><th>备注</th><th></th></tr></thead>
+    <thead><tr>
+      <th><?= t('col.time') ?></th>
+      <th><?= t('col.type') ?></th>
+      <th><?= t('col.glucose') ?></th>
+      <th><?= t('col.carbs') ?></th>
+      <th><?= t('col.insulin') ?></th>
+      <th><?= t('col.notes') ?></th>
+      <th></th>
+    </tr></thead>
     <tbody></tbody>
   </table>
 </div>
 
 <script src="/vendor/echarts.min.js"></script>
 <script>
+const I18N = <?= \NightPanel\Lang::js([
+    'dash.updatedAt',
+    'dash.loadFailed',
+    'dash.empty',
+    'dash.reference',
+    'dash.legend.glucose',
+    'dash.legend.mbg',
+    'dash.targetBand',
+    'dash.chip.iob',
+    'dash.chip.cob',
+    'dash.chip.battery',
+    'dash.live.connecting',
+    'dash.live.live',
+    'dash.live.retry',
+    'dash.live.error',
+    'dash.live.polling',
+    'status.low',
+    'status.high',
+    'status.veryHigh',
+    'status.inRange',
+    'alert.lowBanner',
+    'alert.highBanner',
+    'alert.lowTitle',
+    'alert.highTitle',
+    'alert.body',
+    'col.edit',
+    'col.time',
+]) ?>;
+const LOCALE = <?= json_encode(\NightPanel\Lang::htmlLang()) ?>;
+
 /* mg/dL → mmol/L */
 const MGDL_TO_MMOL = 18;
 
@@ -61,10 +98,10 @@ function themeColors() {
 }
 
 function statusOf (v, low, high) {
-  if (v < low)  return { label: '偏低', color: '#e05a5a' };
-  if (v > 10)   return { label: '急高', color: '#e05a5a' };
-  if (v > high) return { label: '偏高', color: '#e0a05a' };
-  return        { label: '正常', color: '#3fb27f' };
+  if (v < low)  return { label: I18N['status.low'], color: '#e05a5a' };
+  if (v > 10)   return { label: I18N['status.veryHigh'], color: '#e05a5a' };
+  if (v > high) return { label: I18N['status.high'], color: '#e0a05a' };
+  return        { label: I18N['status.inRange'], color: '#3fb27f' };
 }
 
 function fmtDelta (deltaMmol) {
@@ -101,7 +138,7 @@ async function loadAll() {
     document.getElementById('chartMsg').style.display = 'none';
   } catch (e) {
     const msg = document.getElementById('chartMsg');
-    msg.textContent = '数据加载失败：' + e.message;
+    msg.textContent = I18N['dash.loadFailed'].replace(':msg', e.message);
     msg.style.display = 'inline';
     return;
   }
@@ -136,9 +173,9 @@ async function loadAll() {
   const iob = ds.iob && ds.iob.iob != null ? ds.iob.iob + ' U' : '-';
   const cob = ds.cob && ds.cob.cob != null ? ds.cob.cob + ' g' : '-';
   const battery = (ds.uploader && ds.uploader.battery != null) ? ds.uploader.battery + '%' : '-';
-  document.getElementById('chipIob').textContent = 'IOB ' + iob;
-  document.getElementById('chipCob').textContent = 'COB ' + cob;
-  document.getElementById('chipBattery').textContent = '🔋 ' + battery;
+  document.getElementById('chipIob').textContent = I18N['dash.chip.iob'].replace(':value', iob);
+  document.getElementById('chipCob').textContent = I18N['dash.chip.cob'].replace(':value', cob);
+  document.getElementById('chipBattery').textContent = I18N['dash.chip.battery'].replace(':value', battery);
 
   /* 目标范围：来自登录用户自己的 profile 文档（mg/dL → mmol/L），缺省 3.9/6.1 */
   const targetLow  = targetLowOf(glucose);
@@ -152,20 +189,22 @@ async function loadAll() {
     .map(p => [p.ts, p.v]);
 
   buildChart(shown, mbgPoints, targetLow, targetHigh);
-  document.getElementById('updated').textContent =
-    '更新于 ' + new Date().toLocaleTimeString('zh-CN') + '（' + shown.length + ' 条' + (dateVal ? ' · ' + dateVal : '') + '）';
+  document.getElementById('updated').textContent = I18N['dash.updatedAt']
+    .replace(':time', new Date().toLocaleTimeString(LOCALE))
+    .replace(':count', shown.length)
+    .replace(':day', dateVal ? ' · ' + dateVal : '');
 
   const tbody = document.querySelector('#treatments tbody');
   tbody.innerHTML = '';
   (treatments.treatments || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).forEach(t => {
     const row = document.createElement('tr');
-    row.innerHTML = '<td>' + new Date(t.created_at).toLocaleString('zh-CN') + '</td>'
+    row.innerHTML = '<td>' + new Date(t.created_at).toLocaleString(LOCALE) + '</td>'
       + '<td>' + (t.eventType || '-') + '</td>'
       + '<td>' + (t.glucose ?? '-') + '</td>'
       + '<td>' + (t.carbs ?? '-') + '</td>'
       + '<td>' + (t.insulin ?? '-') + '</td>'
       + '<td>' + (t.notes || '') + '</td>'
-      + '<td><a href="/treatments?edit=' + encodeURIComponent(t._id) + '">编辑</a></td>';
+      + '<td><a href="/treatments?edit=' + encodeURIComponent(t._id) + '">' + I18N['col.edit'] + '</a></td>';
     tbody.appendChild(row);
   });
 }
@@ -185,11 +224,15 @@ function buildChart(entries, mbgPoints, targetLow, targetHigh) {
 
   if (entries.length === 0 && mbgPoints.length === 0) {
     if (chart) { chart.dispose(); chart = null; }
-    el.innerHTML = '<p class="hint" style="padding:40px;text-align:center;">暂无血糖数据 —— 在「填写数据」提交血糖，或将 CGM 上传器的设备名设为你的用户名。</p>';
+    el.innerHTML = '<p class="hint" style="padding:40px;text-align:center;">' + I18N['dash.empty'] + '</p>';
     return;
   }
-  if (!chart) chart = echarts.init(el);
-  el.innerHTML = '';
+  // Clear the "no data" placeholder BEFORE the instance is created: wiping the
+  // container afterwards would remove the canvas echarts just mounted.
+  if (!chart) {
+    el.innerHTML = '';
+    chart = echarts.init(el);
+  }
 
   const maxValue = Math.max(
     ...entries.map(p => p.v), ...mbgPoints.map(p => p[1]), targetHigh
@@ -205,7 +248,7 @@ function buildChart(entries, mbgPoints, targetLow, targetHigh) {
 
   const series = [
     {
-      name: '血糖值',
+      name: I18N['dash.legend.glucose'],
       type: 'line',
       data: entries.map(p => [p.ts, p.v]),
       lineStyle: { color: c.accent, width: 2.5 },
@@ -227,7 +270,7 @@ function buildChart(entries, mbgPoints, targetLow, targetHigh) {
         silent: true,
         itemStyle: { color: c.band },
         label: { show: true, position: 'insideTopRight', color: '#3fb27f', fontSize: 11 },
-        data: [[{ name: '目标区间', yAxis: targetLow }, { yAxis: targetHigh }]]
+        data: [[{ name: I18N['dash.targetBand'], yAxis: targetLow }, { yAxis: targetHigh }]]
       },
       markLine: {
         silent: true,
@@ -244,7 +287,7 @@ function buildChart(entries, mbgPoints, targetLow, targetHigh) {
 
   if (mbgPoints.length > 0) {
     series.push({
-      name: '校准血糖',
+      name: I18N['dash.legend.mbg'],
       type: 'scatter',
       data: mbgPoints,
       symbol: 'rect',
@@ -266,19 +309,23 @@ function buildChart(entries, mbgPoints, targetLow, targetHigh) {
         const st = statusOf(v, targetLow, targetHigh);
         const idx = p.dataIndex;
         const dir = entries[idx] && entries[idx].dir ? ' ' + (DIR_ARROWS[entries[idx].dir] || '') : '';
-        return '<b>' + new Date(p.value[0]).toLocaleString('zh-CN') + '</b>' + dir
-          + '<br/>血糖：<b style="color:' + st.color + '">' + v.toFixed(1) + ' mmol/L</b>（' + st.label + '）'
-          + deltaFormatter(idx);
+        const tip = I18N['dash.tooltip']
+          .replace(':value', '<b style="color:' + st.color + '">' + v.toFixed(1) + '</b>')
+          .replace(':status', st.label);
+        return '<b>' + new Date(p.value[0]).toLocaleString(LOCALE) + '</b>' + dir
+          + '<br/>' + tip + deltaFormatter(idx);
       }
     },
     legend: {
-      top: 6, data: mbgPoints.length > 0 ? ['血糖值', '校准血糖'] : ['血糖值'],
+      top: 6, data: mbgPoints.length > 0
+        ? [I18N['dash.legend.glucose'], I18N['dash.legend.mbg']]
+        : [I18N['dash.legend.glucose']],
       textStyle: { color: c.fg }
     },
     grid: { left: 52, right: 20, top: 46, bottom: 70, containLabel: false },
     xAxis: {
       type: 'time',
-      name: '时间',
+      name: I18N['col.time'],
       nameTextStyle: { color: c.muted },
       axisLine: { lineStyle: { color: c.line } },
       axisTick: { show: false },
@@ -336,15 +383,18 @@ function evaluateAlerts (value, settings) {
   banner.style.background = isLow ? 'rgba(224,90,90,.16)' : 'rgba(224,160,90,.16)';
   banner.style.color = isLow ? '#e05a5a' : '#e0a05a';
   banner.style.border = '1px solid ' + (isLow ? 'rgba(224,90,90,.5)' : 'rgba(224,160,90,.5)');
-  banner.textContent = (isLow ? '⚠ 血糖偏低：' : '⚠ 血糖偏高：') + value.toFixed(1) + ' mmol/L'
-    + '（提醒线 ' + (isLow ? '< ' + settings.low : '> ' + settings.high) + '）';
+  banner.textContent = (isLow ? I18N['alert.lowBanner'] : I18N['alert.highBanner'])
+    .replace(':value', value.toFixed(1))
+    .replace(':limit', isLow ? settings.low : settings.high);
 
   // Only notify on a fresh crossing, not on every refresh inside the same zone.
   if (alertState !== state) {
     alertState = state;
     maybeNotify(
-      isLow ? '血糖偏低提醒' : '血糖偏高提醒',
-      value.toFixed(1) + ' mmol/L（提醒线 ' + (isLow ? settings.low : settings.high) + ' mmol/L）',
+      isLow ? I18N['alert.lowTitle'] : I18N['alert.highTitle'],
+      I18N['alert.body']
+        .replace(':value', value.toFixed(1))
+        .replace(':limit', isLow ? settings.low : settings.high),
       settings
     );
   }
@@ -388,27 +438,27 @@ function applyStreamReading (payload) {
 
 function connectStream () {
   if (typeof EventSource === 'undefined') {
-    setLiveState('● 轮询模式', '#8b95a9');
+    setLiveState(I18N['dash.live.polling'], '#8b95a9');
     return;
   }
   const source = new EventSource('/stream');
 
-  source.addEventListener('open', () => setLiveState('● 实时', '#3fb27f'));
+  source.addEventListener('open', () => setLiveState(I18N['dash.live.live'], '#3fb27f'));
   source.addEventListener('reading', ev => {
     try { applyStreamReading(JSON.parse(ev.data)); } catch (e) { }
   });
   source.addEventListener('streamerror', () => {
-    setLiveState('● 数据源异常', '#e05a5a');
+    setLiveState(I18N['dash.live.error'], '#e05a5a');
   });
   source.addEventListener('bye', () => {
     // The server closes the stream after ~2 minutes; reconnect deliberately so
     // the interval is explicit instead of relying on the browser's backoff.
     source.close();
-    setLiveState('● 重连中', '#e0a05a');
+    setLiveState(I18N['dash.live.retry'], '#e0a05a');
     setTimeout(connectStream, 1500);
   });
   source.addEventListener('error', () => {
-    setLiveState('● 重连中', '#e0a05a');
+    setLiveState(I18N['dash.live.retry'], '#e0a05a');
   });
 }
 

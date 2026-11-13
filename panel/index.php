@@ -8,17 +8,21 @@ require __DIR__ . '/lib/TreatmentTypes.php';
 require __DIR__ . '/lib/GlucoseStats.php';
 require __DIR__ . '/lib/Alerts.php';
 require __DIR__ . '/lib/ReportCache.php';
+require __DIR__ . '/lib/Lang.php';
+require __DIR__ . '/lib/helpers.php';
 
 use NightPanel\Alerts;
 use NightPanel\Auth;
 use NightPanel\Db;
 use NightPanel\GlucoseStats;
+use NightPanel\Lang;
 use NightPanel\NsClient;
 use NightPanel\NsException;
 use NightPanel\ReportCache;
 use NightPanel\TreatmentTypes;
 
 Auth::boot();
+Lang::init();
 Auth::bootstrapAdmin();
 
 /* ------------------------------------------------------------------ config */
@@ -48,7 +52,7 @@ function nsClient(): NsClient
         $url = nsBaseUrl();
         $secret = nsAdminSecret();
         if ($url === '' || $secret === '') {
-            throw new NsException('Nightscout backend is not configured yet.');
+            throw new NsException(Lang::t('err.nsNotConfigured'));
         }
         $client = new NsClient($url, $secret);
     }
@@ -280,7 +284,7 @@ try {
             Auth::assertCsrf($_POST['csrf'] ?? null);
             $user = findUser(trim((string)($_POST['username'] ?? '')));
             if ($user === null || !password_verify((string)($_POST['password'] ?? ''), $user['password_hash'])) {
-                view('login', ['error' => '用户名或密码错误']);
+                view('login', ['error' => Lang::t('login.invalid')]);
                 break;
             }
             Auth::login($user);
@@ -290,6 +294,16 @@ try {
         case $path === '/logout':
             Auth::logout();
             header('Location: /login');
+            exit;
+
+        case $path === '/lang' && $method === 'POST':
+            Auth::assertCsrf($_POST['csrf'] ?? null);
+            Lang::set((string)($_POST['lang'] ?? ''));
+            // Back to the page the switcher was used on, defaulting to the
+            // dashboard for a fresh (or forged) request.
+            $back = (string)($_POST['back'] ?? '');
+            $target = preg_match('#^/[a-z0-9/?=_.&-]*$#i', $back) === 1 ? $back : '/dashboard';
+            header('Location: ' . $target);
             exit;
 
         case $path === '/register' && $method === 'GET':
@@ -303,11 +317,11 @@ try {
             $error = null;
 
             if (!validUsername($username)) {
-                $error = '用户名只能包含小写字母、数字、下划线和短横线，长度 3-24，且以字母或数字开头';
+                $error = Lang::t('val.usernameFormat');
             } elseif (strlen($password) < 8) {
-                $error = '密码至少 8 位';
+                $error = Lang::t('val.passwordLength');
             } elseif (findUser($username) !== null) {
-                $error = '用户名已被占用';
+                $error = Lang::t('val.usernameTaken');
             }
 
             if ($error !== null) {
@@ -318,7 +332,7 @@ try {
             try {
                 $provisioned = provisionUser($username);
             } catch (NsException $e) {
-                view('register', ['error' => '开通失败：' . $e->getMessage(), 'success' => null, 'info' => null]);
+                view('register', ['error' => Lang::t('val.provisionFailed', ['msg' => $e->getMessage()]), 'success' => null, 'info' => null]);
                 break;
             }
 
@@ -472,7 +486,7 @@ try {
                 'user' => $user,
                 'settings' => $settings,
                 'error' => $error,
-                'success' => $error === null ? '提醒设置已保存' : null,
+                'success' => $error === null ? Lang::t('msg.alertSaved') : null,
             ]);
             break;
 
@@ -501,7 +515,7 @@ try {
                         if ($line === '') continue;
                         $parts = array_map('trim', explode(',', $line));
                         if (count($parts) !== 2 || !is_numeric($parts[0]) || !is_numeric($parts[1])) {
-                            throw new \InvalidArgumentException('格式错误: ' . $line);
+                            throw new \InvalidArgumentException(Lang::t('val.pairFormat', ['line' => $line]));
                         }
                         $out[] = [(float)$parts[0], (float)$parts[1]];
                     }
@@ -531,7 +545,7 @@ try {
                 view('profile', [
                     'user' => $user,
                     'profile' => $record['store'][$user['username']] ?? null,
-                    'error' => '保存失败：' . $e->getMessage(),
+                    'error' => Lang::t('msg.saveFailed', ['msg' => $e->getMessage()]),
                     'success' => null,
                 ]);
             } catch (NsException $e) {
@@ -539,7 +553,7 @@ try {
                 view('profile', [
                     'user' => $user,
                     'profile' => $record['store'][$user['username']] ?? null,
-                    'error' => '保存失败：' . $e->getMessage(),
+                    'error' => Lang::t('msg.saveFailed', ['msg' => $e->getMessage()]),
                     'success' => null,
                 ]);
             }
@@ -566,7 +580,7 @@ try {
                 switch ($kind) {
                     case 'glucose':
                         $sgv = (float)($_POST['sgv'] ?? 0);
-                        if ($sgv < 10 || $sgv > 600) { throw new \InvalidArgumentException('血糖值需在 10-600 mg/dL 之间'); }
+                        if ($sgv < 10 || $sgv > 600) { throw new \InvalidArgumentException(Lang::t('val.glucoseRange')); }
                         $client->createEntry($user['username'], $sgv, ($_POST['timestamp'] ?? '') ?: null);
                         break;
                     case 'treatment':
@@ -574,7 +588,7 @@ try {
                         // fields that belong to the chosen type are written.
                         $eventType = (string)($_POST['eventType'] ?? '');
                         if (!TreatmentTypes::has($eventType)) {
-                            throw new \InvalidArgumentException('不支持的事件类型');
+                            throw new \InvalidArgumentException(Lang::t('val.unsupportedEvent'));
                         }
                         $record = TreatmentTypes::build($eventType, $_POST);
                         $client->createTreatment($record, $user['username']);
@@ -587,14 +601,14 @@ try {
                         ], $user['username']);
                         break;
                     default:
-                        throw new \InvalidArgumentException('未知的数据类型');
+                        throw new \InvalidArgumentException(Lang::t('val.unknownKind'));
                 }
                 view('entry', [
                     'user' => $user,
                     'types' => TreatmentTypes::types(),
                     'fields' => TreatmentTypes::fields(),
                     'error' => null,
-                    'success' => '数据已提交',
+                    'success' => Lang::t('msg.dataSubmitted'),
                     'preset' => '',
                 ]);
             } catch (\InvalidArgumentException $e) {
@@ -611,7 +625,7 @@ try {
                     'user' => $user,
                     'types' => TreatmentTypes::types(),
                     'fields' => TreatmentTypes::fields(),
-                    'error' => '提交失败：' . $e->getMessage(),
+                    'error' => Lang::t('msg.submitFailed', ['msg' => $e->getMessage()]),
                     'success' => null,
                     'preset' => (string)($_POST['eventType'] ?? ''),
                 ]);
@@ -657,7 +671,7 @@ try {
                     'fields' => TreatmentTypes::fields(),
                     'treatments' => $client->treatmentsByUser($user['username'], 100),
                     'editing' => null,
-                    'error' => '无权修改该记录',
+                    'error' => Lang::t('val.notOwner'),
                     'success' => null,
                 ]);
                 break;
@@ -683,7 +697,7 @@ try {
                     'fields' => TreatmentTypes::fields(),
                     'treatments' => $client->treatmentsByUser($user['username'], 100),
                     'editing' => $existing,
-                    'error' => '保存失败：' . $e->getMessage(),
+                    'error' => Lang::t('msg.saveFailed', ['msg' => $e->getMessage()]),
                     'success' => null,
                 ]);
             } catch (NsException $e) {
@@ -693,7 +707,7 @@ try {
                     'fields' => TreatmentTypes::fields(),
                     'treatments' => $client->treatmentsByUser($user['username'], 100),
                     'editing' => $existing,
-                    'error' => '保存失败：' . $e->getMessage(),
+                    'error' => Lang::t('msg.saveFailed', ['msg' => $e->getMessage()]),
                     'success' => null,
                 ]);
             }
@@ -735,7 +749,7 @@ try {
                     if ((string)$record['_id'] === $planId) { $source = $record; break; }
                 }
                 if ($source === null || !isset($source['store'][$user['username']])) {
-                    throw new \InvalidArgumentException('方案不存在');
+                    throw new \InvalidArgumentException(Lang::t('val.planNotFound'));
                 }
 
                 // The new record has to carry every other user's store entry as
@@ -756,7 +770,7 @@ try {
             } catch (\InvalidArgumentException $e) {
                 $error = $e->getMessage();
             } catch (NsException $e) {
-                $error = '启用失败：' . $e->getMessage();
+                $error = Lang::t('msg.enableFailed', ['msg' => $e->getMessage()]);
             }
             if ($error === null) { header('Location: /profile/plans'); exit; }
             view('plans', ['user' => $user, 'plans' => collect_plans($user['username']), 'error' => $error, 'success' => null]);
@@ -775,22 +789,22 @@ try {
                     if ((string)$record['_id'] === $planId) { $target = $record; $index = $i; break; }
                 }
                 if ($target === null) {
-                    throw new \InvalidArgumentException('方案不存在');
+                    throw new \InvalidArgumentException(Lang::t('val.planNotFound'));
                 }
                 // A shared record holds other users' entries too: deleting it
                 // would destroy their plans, so only single-owner records go.
                 $keys = array_keys($target['store'] ?? []);
                 if ($keys !== [$user['username']]) {
-                    throw new \InvalidArgumentException('该方案记录包含其他用户的数据，不能删除');
+                    throw new \InvalidArgumentException(Lang::t('val.planShared'));
                 }
                 if ($index === 0) {
-                    throw new \InvalidArgumentException('当前生效的方案不能删除');
+                    throw new \InvalidArgumentException(Lang::t('val.planActive'));
                 }
                 nsClient()->requestOrThrow('DELETE', '/api/v1/profile/' . rawurlencode($planId));
             } catch (\InvalidArgumentException $e) {
                 $error = $e->getMessage();
             } catch (NsException $e) {
-                $error = '删除失败：' . $e->getMessage();
+                $error = Lang::t('msg.deleteFailed', ['msg' => $e->getMessage()]);
             }
             if ($error === null) { header('Location: /profile/plans'); exit; }
             view('plans', ['user' => $user, 'plans' => collect_plans($user['username']), 'error' => $error, 'success' => null]);
@@ -845,7 +859,7 @@ try {
             }
             csv_out(
                 'glucose-' . $user['username'] . '-' . $days . 'd.csv',
-                ['时间(UTC)', '血糖(mg/dL)', '血糖(mmol/L)', '趋势', '变化(mg/dL)'],
+                [Lang::t('csv.timeUtc'), Lang::t('csv.glucoseMgdl'), Lang::t('csv.glucoseMmol'), Lang::t('csv.direction'), Lang::t('csv.delta')],
                 $rows
             );
 
@@ -893,7 +907,7 @@ try {
             }
             csv_out(
                 'treatments-' . $user['username'] . '-' . $days . 'd.csv',
-                ['时间', '类型', '血糖(mg/dL)', '碳水(g)', '胰岛素(U)', '时长(分钟)', '基础率(U/h)', '百分比(%)', '备注'],
+                [Lang::t('csv.time'), Lang::t('csv.type'), Lang::t('csv.glucoseMgdl'), Lang::t('csv.carbs'), Lang::t('csv.insulin'), Lang::t('csv.duration'), Lang::t('csv.basalRate'), Lang::t('csv.percent'), Lang::t('csv.notes')],
                 $rows
             );
 
@@ -943,8 +957,8 @@ try {
     }
 } catch (NsException $e) {
     http_response_code(502);
-    view('error', ['message' => 'Nightscout 后端不可用：' . $e->getMessage()]);
+    view('error', ['message' => Lang::t('err.nsUnavailable', ['msg' => $e->getMessage()])]);
 } catch (\Throwable $e) {
     http_response_code(500);
-    view('error', ['message' => '面板错误：' . $e->getMessage()]);
+    view('error', ['message' => Lang::t('err.panel', ['msg' => $e->getMessage()])]);
 }

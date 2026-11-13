@@ -1,10 +1,10 @@
 <?php /** @var array|null $user */ ?>
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="<?= \NightPanel\Lang::htmlLang() ?>">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Nightscout 多用户面板</title>
+<title><?= t('app.title') ?></title>
 <style>
   :root { --bg:#1a1f2b; --card:#232a38; --line:#313a4d; --fg:#e6ebf4; --muted:#8b95a9; --accent:#4f8ef7; --ok:#3fb27f; --bad:#e05a5a; --input-bg:#1b212d; --code-bg:#171c26; }
   html.light { --bg:#f2f4f8; --card:#ffffff; --line:#d8dee9; --fg:#1c2430; --muted:#5f6b7e; --accent:#2f6fe0; --ok:#22885e; --bad:#c73f3f; --input-bg:#eef1f6; --code-bg:#eef1f6; }
@@ -42,31 +42,44 @@
 </head>
 <body>
 <nav>
-  <strong>Nightscout 面板</strong>
-  <button type="button" class="theme-toggle" id="themeToggle" title="切换日间/夜间模式"></button>
+  <strong><?= t('app.brand') ?></strong>
+  <button type="button" class="theme-toggle" id="themeToggle" title="<?= t('theme.toggle') ?>"></button>
   <?php if ($user !== null): ?>
-    <a href="/dashboard">仪表盘</a>
-    <a href="/reports">统计报告</a>
-    <a href="/profile">我的 Profile</a>
-    <a href="/profile/plans">治疗方案</a>
-    <a href="/entry">填写数据</a>
-    <a href="/treatments">我的记录</a>
-    <a href="/settings/alerts">提醒设置</a>
-    <a href="/myapi">我的 API</a>
-    <?php if (($user['role'] ?? '') === 'admin'): ?><a href="/admin/users">管理</a><?php endif; ?>
-    <span class="right"><?= htmlspecialchars((string)($user['username'] ?? '')) ?> · <a href="/logout">退出</a></span>
+    <a href="/dashboard"><?= t('nav.dashboard') ?></a>
+    <a href="/reports"><?= t('nav.reports') ?></a>
+    <a href="/profile"><?= t('nav.profile') ?></a>
+    <a href="/profile/plans"><?= t('nav.plans') ?></a>
+    <a href="/entry"><?= t('nav.entry') ?></a>
+    <a href="/treatments"><?= t('nav.treatments') ?></a>
+    <a href="/settings/alerts"><?= t('nav.alerts') ?></a>
+    <a href="/myapi"><?= t('nav.myapi') ?></a>
+    <?php if (($user['role'] ?? '') === 'admin'): ?><a href="/admin/users"><?= t('nav.admin') ?></a><?php endif; ?>
+    <span class="right"><?= htmlspecialchars((string)($user['username'] ?? '')) ?> · <a href="/logout"><?= t('nav.logout') ?></a></span>
   <?php endif; ?>
+  <span class="<?= $user !== null ? '' : 'right' ?>" style="display:inline-flex;align-items:center;gap:6px;">
+    <span class="hint"><?= t('lang.switch') ?></span>
+    <?php foreach (\NightPanel\Lang::available() as $code => $name): ?>
+      <form method="post" action="/lang" style="display:inline;">
+        <input type="hidden" name="csrf" value="<?= htmlspecialchars(\NightPanel\Auth::csrfToken()) ?>">
+        <input type="hidden" name="lang" value="<?= htmlspecialchars($code) ?>">
+        <input type="hidden" name="back" value="<?= htmlspecialchars((string)($_SERVER['REQUEST_URI'] ?? '/dashboard')) ?>">
+        <button type="submit" style="margin:0;padding:2px 8px;font-size:12px;<?= \NightPanel\Lang::current() === $code ? '' : 'background:transparent;border:1px solid var(--line);color:var(--fg);' ?>"><?= htmlspecialchars($name) ?></button>
+      </form>
+    <?php endforeach; ?>
+  </span>
 </nav>
 <main>
 <?php require __DIR__ . '/' . $template . '.php'; ?>
 </main>
 <script>
+window.PANEL_I18N = <?= \NightPanel\Lang::js(['theme.toLight', 'theme.toDark']) ?>;
+window.PANEL_LOCALE = <?= json_encode(\NightPanel\Lang::htmlLang()) ?>;
 (function () {
   var btn = document.getElementById('themeToggle');
   function paint() {
     var light = document.documentElement.classList.contains('light');
     btn.textContent = light ? '🌙' : '☀️';
-    btn.title = light ? '切换到夜间模式' : '切换到日间模式';
+    btn.title = light ? PANEL_I18N['theme.toDark'] : PANEL_I18N['theme.toLight'];
   }
   btn.addEventListener('click', function () {
     var light = document.documentElement.classList.toggle('light');

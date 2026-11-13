@@ -1,40 +1,87 @@
-<h1>填写数据</h1>
+<?php
+// The registry stores translation keys; resolve them once here so the page's
+// JavaScript can render labels without a second round trip.
+$jsTypes = [];
+foreach ($types as $name => $def) {
+    $jsTypes[$name] = ['label' => t($def[0]), 'fields' => $def[1], 'group' => $def[2]];
+}
+$jsFields = [];
+foreach ($fields as $name => $def) {
+    $jsFields[$name] = [
+        'kind' => $def[0],
+        'label' => t($def[1]),
+        'unit' => $def[2],
+        'min' => $def[3],
+        'max' => $def[4],
+        'step' => $def[5],
+    ];
+}
+$jsGroups = [];
+foreach (['bolus', 'monitor', 'temp', 'care'] as $group) {
+    $jsGroups[$group] = t('group.' . $group);
+}
+?>
+<h1><?= t('entry.title') ?></h1>
 
 <?php if (!empty($error)): ?><p class="msg-bad"><?= htmlspecialchars($error) ?></p><?php endif; ?>
 <?php if (!empty($success)): ?><p class="msg-ok"><?= htmlspecialchars($success) ?></p><?php endif; ?>
 
 <div class="card">
-  <h1 style="font-size:16px;">手填血糖</h1>
+  <h1 style="font-size:16px;"><?= t('entry.glucoseTitle') ?></h1>
   <form method="post" action="/entry">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars(\NightPanel\Auth::csrfToken()) ?>">
     <input type="hidden" name="kind" value="glucose">
     <div class="grid">
-      <div><label>血糖值 mg/dL</label><input name="sgv" type="number" step="1" min="10" max="600" required></div>
-      <div><label>时间（留空为现在）</label><input name="timestamp" type="datetime-local"></div>
+      <div><label><?= t('entry.glucoseValue') ?></label><input name="sgv" type="number" step="1" min="10" max="600" required></div>
+      <div><label><?= t('entry.glucoseTime') ?></label><input name="timestamp" type="datetime-local"></div>
     </div>
-    <button>提交血糖</button>
-    <span class="hint">写入 device = <?= htmlspecialchars($user['username']) ?>，仅你自己在面板可见。</span>
+    <button><?= t('entry.submitGlucose') ?></button>
+    <span class="hint"><?= t('entry.glucoseNote', ['name' => htmlspecialchars($user['username'])]) ?></span>
   </form>
 </div>
 
 <div class="card">
-  <h1 style="font-size:16px;">治疗记录</h1>
-  <p class="hint">选择事件类型后，表单只显示该类型需要的字段；不支持的类型不会写入 Nightscout。</p>
+  <h1 style="font-size:16px;"><?= t('entry.treatmentTitle') ?></h1>
+  <p class="hint"><?= t('entry.treatmentHint') ?></p>
   <form method="post" action="/entry" id="treatmentForm">
     <input type="hidden" name="csrf" value="<?= htmlspecialchars(\NightPanel\Auth::csrfToken()) ?>">
     <input type="hidden" name="kind" value="treatment">
-    <label>事件类型</label>
+    <label><?= t('entry.eventType') ?></label>
     <select name="eventType" id="eventType" required></select>
     <div id="dynamicFields" class="grid"></div>
-    <button>提交治疗记录</button>
-    <span class="hint">写入 enteredBy = <?= htmlspecialchars($user['username']) ?>。</span>
+    <button><?= t('entry.submitTreatment') ?></button>
+    <span class="hint"><?= t('entry.treatmentNote', ['name' => htmlspecialchars($user['username'])]) ?></span>
+  </form>
+</div>
+
+<div class="card">
+  <h1 style="font-size:16px;"><?= t('entry.activityTitle') ?></h1>
+  <form method="post" action="/entry">
+    <input type="hidden" name="csrf" value="<?= htmlspecialchars(\NightPanel\Auth::csrfToken()) ?>">
+    <input type="hidden" name="kind" value="activity">
+    <div class="grid">
+      <div>
+        <label><?= t('entry.activityType') ?></label>
+        <select name="activityType">
+          <option value="Exercise"><?= t('activity.exercise') ?></option>
+          <option value="Work"><?= t('activity.work') ?></option>
+          <option value="Sport"><?= t('activity.sport') ?></option>
+          <option value="Walk"><?= t('activity.walk') ?></option>
+          <option value="Run"><?= t('activity.run') ?></option>
+        </select>
+      </div>
+      <div><label><?= t('field.duration') ?> (min)</label><input name="duration" type="number" step="1"></div>
+    </div>
+    <label><?= t('field.notes') ?></label><input name="notes">
+    <button><?= t('entry.submitActivity') ?></button>
+    <span class="hint"><?= t('entry.activityNote') ?></span>
   </form>
 </div>
 
 <script>
-const TYPES = <?= json_encode($types, JSON_UNESCAPED_UNICODE) ?>;
-const FIELDS = <?= json_encode($fields, JSON_UNESCAPED_UNICODE) ?>;
-const GROUPS = { bolus: '大剂量 / 碳水', monitor: '监测与备注', temp: '临时与方案', care: '设备与护理' };
+const TYPES = <?= json_encode($jsTypes, JSON_UNESCAPED_UNICODE) ?>;
+const FIELDS = <?= json_encode($jsFields, JSON_UNESCAPED_UNICODE) ?>;
+const GROUPS = <?= json_encode($jsGroups, JSON_UNESCAPED_UNICODE) ?>;
 const PRESET = <?= json_encode($preset ?? '', JSON_UNESCAPED_UNICODE) ?>;
 
 const typeSelect = document.getElementById('eventType');
@@ -45,10 +92,10 @@ Object.keys(GROUPS).forEach(group => {
   const optgroup = document.createElement('optgroup');
   optgroup.label = GROUPS[group];
   Object.keys(TYPES).forEach(name => {
-    if (TYPES[name][2] !== group) return;
+    if (TYPES[name].group !== group) return;
     const opt = document.createElement('option');
     opt.value = name;
-    opt.textContent = TYPES[name][0] + '（' + name + '）';
+    opt.textContent = TYPES[name].label + ' (' + name + ')';
     if (name === PRESET) opt.selected = true;
     optgroup.appendChild(opt);
   });
@@ -58,25 +105,22 @@ Object.keys(GROUPS).forEach(group => {
 /* Rebuild the visible fields whenever the type changes. */
 function renderFields () {
   container.innerHTML = '';
-  const names = TYPES[typeSelect.value][1] || [];
-  names.forEach(name => {
+  (TYPES[typeSelect.value].fields || []).forEach(name => {
     const def = FIELDS[name];
     if (!def) return;
-    const [kind, label, unit, min, max, step] = def;
     const wrap = document.createElement('div');
     const id = 'f_' + name;
-    wrap.innerHTML = '<label for="' + id + '">' + label + (unit ? '（' + unit + '）' : '') + '</label>';
+    wrap.innerHTML = '<label for="' + id + '">' + def.label + (def.unit ? ' (' + def.unit + ')' : '') + '</label>';
     const input = document.createElement('input');
     input.id = id;
     input.name = name;
-    if (kind === 'number') {
+    if (def.kind === 'number') {
       input.type = 'number';
-      input.step = step || '1';
-      if (min) input.min = min;
-      if (max) input.max = max;
+      input.step = def.step || '1';
+      if (def.min) input.min = def.min;
+      if (def.max) input.max = def.max;
     } else {
       input.type = 'text';
-      if (name === 'notes') input.placeholder = '可选说明';
     }
     wrap.appendChild(input);
     container.appendChild(wrap);

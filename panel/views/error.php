@@ -1,5 +1,5 @@
 <div class="card" style="max-width:640px;margin:60px auto;">
-  <h1>出错了</h1>
-  <p class="msg-bad"><?= htmlspecialchars((string)($message ?? '未知错误')) ?></p>
-  <p><a href="/dashboard">返回仪表盘</a></p>
+  <h1><?= t('err.title') ?></h1>
+  <p class="msg-bad"><?= htmlspecialchars((string)($message ?? t('err.unknown'))) ?></p>
+  <p><a href="/dashboard"><?= t('err.back') ?></a></p>
 </div>

@@ -77,6 +77,14 @@ api:entries/treatments/activity/devicestatus:create   上传数据
 
 事件类型与字段的唯一定义处是 `lib/TreatmentTypes.php`：表单由此生成，控制器也据此校验。新增类型只需在 `types()` 里加一行并复用 `fields()` 中的字段，表单与校验自动跟上；未登记的类型不会写入 Nightscout。
 
+### 多语言
+
+- 界面支持 **简体中文（默认）与 English**，导航右上角的语言按钮即时切换
+- 选择顺序：会话中的选择 → 上次的 cookie → 浏览器 `Accept-Language` → 默认 `zh_cn`
+- 文案集中在 `panel/lang/zh_cn.php` 与 `panel/lang/en.php`（扁平 key → 文本，支持 `:name` 占位符）；视图与控制器统一走 `t('key')`，JavaScript 用 `Lang::js([...])` 注入
+- 图表、动态表单字段、CSV 表头、错误与成功提示都走同一套字典；`html lang` 与 JS 的日期格式随语言切换
+- 新增文案只需在两个字典里各加一行；`php panel/tests/lang-test.php` 会校验两份字典 key 完全一致、占位符一致，并扫描代码中用到的 key 是否都已定义
+
 ## 测试
 
 Nightscout 权限改造的单元测试：`tests/profile-scoped.test.js`
@@ -85,9 +93,10 @@ Nightscout 权限改造的单元测试：`tests/profile-scoped.test.js`
 npx env-cmd -f ./tests/ci.test.env npx mocha --timeout 30000 --require ./tests/hooks.js --exit ./tests/profile-scoped.test.js ./tests/entries-scoped.test.js
 ```
 
-面板统计与提醒逻辑的自检（无需任何依赖）：
+面板统计、提醒与文案的自检（无需任何依赖）：
 
 ```bash
 php panel/tests/glucose-stats-test.php
 php panel/tests/alerts-test.php
+php panel/tests/lang-test.php
 ```
