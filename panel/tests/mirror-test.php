@@ -145,6 +145,12 @@ check('secret() decrypts the stored value', Db::secret('ns_secret') === 'shiro-s
 Db::setSetting('ns_secret', 'legacy-plaintext');
 check('secret() still reads legacy plaintext', Db::secret('ns_secret') === 'legacy-plaintext');
 
+// The key seed must not sit inside the database: a stolen panel.db would
+// otherwise carry both the ciphertext and the material to decrypt it.
+check('key seed lives beside the database', is_file($dbFile . '.key'));
+check('key seed is not stored in panel_settings', Db::setting('key_seed') === null);
+check('key seed file is private', (fileperms($dbFile . '.key') & 0777) === 0600);
+
 // M5: fixed-window throttling.
 check('rateLimit allows attempts inside the window', Db::rateLimit('test', 'k', 2, 60));
 check('rateLimit allows the limit itself', Db::rateLimit('test', 'k', 2, 60));
@@ -154,6 +160,7 @@ check('rateLimit keeps identities apart', Db::rateLimit('test', 'other', 2, 60))
 @unlink($dbFile);
 @unlink($dbFile . '-wal');
 @unlink($dbFile . '-shm');
+@unlink($dbFile . '.key');
 
 echo $failures === 0 ? "\nOK — {$checks} checks passed\n" : "\n{$failures} of {$checks} checks failed\n";
 exit($failures === 0 ? 0 : 1);

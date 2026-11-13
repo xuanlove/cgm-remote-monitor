@@ -29,7 +29,7 @@ final class Auth
      * loopback/private peer (or when PANEL_TRUST_PROXY=1) to keep a direct
      * client from forcing Secure cookies on a plain-HTTP install.
      */
-    private static function isHttps(): bool
+    public static function isHttps(): bool
     {
         $https = strtolower((string)($_SERVER['HTTPS'] ?? ''));
         if ($https !== '' && $https !== 'off') {

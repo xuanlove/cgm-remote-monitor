@@ -241,7 +241,7 @@ final class Sync
                 $stmt->execute([
                     $userId,
                     $nsId,
-                    gmdate('c', $ts / 1000),
+                    gmdate('c', intdiv($ts, 1000)),
                     isset($record['eventType']) ? (string)$record['eventType'] : null,
                     json_encode($record, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
                     gmdate('c'),
@@ -328,12 +328,14 @@ final class Sync
         $limit = $kind === 'low' ? (float)$settings['low'] : (float)$settings['high'];
         $ts = (int)$row['ts'];
 
-        $since = self::nowMs() - self::ALERT_DEDUPE_MS;
+        // Dedupe on when the event was *created*, not on the reading time: a
+        // CGM that stopped uploading keeps an old reading timestamp, which made
+        // the window miss every time and produced one event per sync run.
         $dup = Db::pdo()->prepare(
             'SELECT 1 FROM panel_alert_events
-              WHERE user_id = ? AND kind = ? AND ts >= ? LIMIT 1'
+              WHERE user_id = ? AND kind = ? AND created_at >= ? LIMIT 1'
         );
-        $dup->execute([$userId, $kind, $since]);
+        $dup->execute([$userId, $kind, gmdate('Y-m-d H:i:s', time() - intdiv(self::ALERT_DEDUPE_MS, 1000))]);
         if ($dup->fetchColumn() !== false) {
             return 0;
         }

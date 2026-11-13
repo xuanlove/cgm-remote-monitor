@@ -81,6 +81,7 @@ final class Lang
                 'expires' => time() + 86400 * 365,
                 'path' => '/',
                 'httponly' => true,
+                'secure' => Auth::isHttps(),
                 'samesite' => 'Lax',
             ]);
         }

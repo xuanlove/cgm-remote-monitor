@@ -4,4 +4,6 @@
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteRule ^(?:data|lib|bin|tests|lang)(?:/|$) - [F,L]
+    # Development demo page, not part of the panel.
+    RewriteRule ^glucose-trend-demo\.html$ - [F,L]
 </IfModule>

@@ -125,7 +125,7 @@ final class NsClient
         } catch (NsException $e) {
             // A retry after a partial failure hits the name-already-taken 400;
             // the fetch below still finds the subject and its token.
-            if (strpos($e->getMessage(), 'HTTP 400') === false) {
+            if ($e->httpStatus() !== 400) {
                 throw $e;
             }
         }
@@ -144,6 +144,24 @@ final class NsClient
     public function deleteSubject(string $subjectId): void
     {
         $this->requestOrThrow('DELETE', '/api/v2/authorization/subjects/' . rawurlencode($subjectId));
+    }
+
+    /** Remove the per-user role, addressed by name (Nightscout deletes by id). */
+    public function deleteRoleByName(string $name): void
+    {
+        $roles = $this->requestOrThrow('GET', '/api/v2/authorization/roles');
+        foreach (is_array($roles) ? $roles : [] as $role) {
+            if (($role['name'] ?? null) === $name && !empty($role['_id'])) {
+                $this->requestOrThrow(
+                    'DELETE',
+                    '/api/v2/authorization/roles/' . rawurlencode((string)$role['_id']),
+                    null,
+                    null,
+                    [200, 204]
+                );
+                return;
+            }
+        }
     }
 
     /** CGM entries for one device attribution. */
@@ -250,11 +268,22 @@ final class NsClient
     /** Hand-entered glucose value, attributed through the device field. */
     public function createEntry(string $device, float $sgv, ?string $timestamp = null): array
     {
+        $dateMs = (int)round(microtime(true) * 1000);
+        if ($timestamp !== null) {
+            // An unparsable value used to become date=0, which Nightscout
+            // stores as a 1970 reading the mirror then discards: reject it here
+            // instead of writing a record only one side knows about.
+            $parsed = strtotime($timestamp);
+            if ($parsed === false) {
+                throw new NsException('Invalid entry timestamp: ' . $timestamp);
+            }
+            $dateMs = $parsed * 1000;
+        }
         return $this->requestOrThrow('POST', '/api/v1/entries.json', [[
             'type' => 'sgv',
             'sgv' => (int)round($sgv),
             'device' => $device,
-            'date' => $timestamp !== null ? strtotime($timestamp) * 1000 : round(microtime(true) * 1000),
+            'date' => $dateMs,
             'dateString' => $timestamp ?? gmdate('c'),
         ]]);
     }

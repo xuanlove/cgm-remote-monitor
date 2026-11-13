@@ -292,6 +292,14 @@ final class Mirror
         if ($nsId === '' || $createdAt === '') {
             return;
         }
+        // Nightscout answers with a "…000Z" timestamp while the sync writes
+        // "+00:00"; both mean the same instant, but mixing the two formats in
+        // one column breaks string ordering. Store the canonical form.
+        $parsed = strtotime($createdAt);
+        if ($parsed === false) {
+            return;
+        }
+        $createdAt = gmdate('c', $parsed);
         $stmt = Db::pdo()->prepare(
             'INSERT INTO panel_treatments (user_id, ns_id, created_at, event_type, payload, updated_at)
              VALUES (?, ?, ?, ?, ?, ?)

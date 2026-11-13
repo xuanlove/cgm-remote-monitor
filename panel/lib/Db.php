@@ -219,18 +219,40 @@ final class Db
     private static function secretKey(): string
     {
         $env = getenv('PANEL_SECRET_KEY');
-        if ($env === false || $env === '') {
-            // Stable per-installation fallback so the panel works out of the box;
-            // production deployments should set PANEL_SECRET_KEY.
-            $seed = __FILE__ . '|night-panel|' . (self::setting('key_seed') ?? '');
-            if (self::setting('key_seed') === null) {
-                $seedValue = bin2hex(random_bytes(32));
-                self::setSetting('key_seed', $seedValue);
-                $seed = __FILE__ . '|night-panel|' . $seedValue;
-            }
-            return hash('sha256', $seed, true);
+        if ($env !== false && $env !== '') {
+            return hash('sha256', $env, true);
         }
-        return hash('sha256', $env, true);
+        // Fallback for installs that do not set the env var: the seed lives in
+        // a 0600 file next to the database, never inside it. Keeping the seed
+        // in panel_settings would put the key and the ciphertext in the same
+        // file, so a copy of panel.db would be enough to decrypt everything.
+        return hash('sha256', __FILE__ . '|night-panel|' . self::keySeed(), true);
+    }
+
+    /** Read (or create) the on-disk key seed; migrates the old in-DB seed. */
+    private static function keySeed(): string
+    {
+        $file = self::file() . '.key';
+        if (is_file($file)) {
+            $seed = trim((string)file_get_contents($file));
+            if ($seed !== '') {
+                return $seed;
+            }
+        }
+
+        // An installation upgraded from an earlier release still has the seed
+        // in the settings table. Adopt it so existing ciphertexts stay readable,
+        // then remove the in-database copy.
+        $legacy = self::setting('key_seed');
+        $seed = ($legacy !== null && $legacy !== '') ? $legacy : bin2hex(random_bytes(32));
+
+        if (@file_put_contents($file, $seed . "\n", LOCK_EX) !== false) {
+            @chmod($file, 0600);
+            if ($legacy !== null) {
+                self::pdo()->prepare('DELETE FROM panel_settings WHERE key = ?')->execute(['key_seed']);
+            }
+        }
+        return $seed;
     }
 
     public static function setting(string $key): ?string
@@ -294,18 +316,30 @@ final class Db
         $window = intdiv($now, $windowSec) * $windowSec;
         $pdo = self::pdo();
 
-        // Expired windows are never read again.
-        $pdo->prepare('DELETE FROM panel_rate_limits WHERE window_start < ?')->execute([$now - 86400]);
-        $pdo->prepare(
-            'INSERT INTO panel_rate_limits (bucket, identity, window_start, hits) VALUES (?, ?, ?, 1)
-             ON CONFLICT(bucket, identity, window_start) DO UPDATE SET hits = hits + 1'
-        )->execute([$bucket, $identity, $window]);
+        // Count and read inside one write transaction: two concurrent attempts
+        // for the same identity would otherwise both read the pre-increment
+        // value and slip past the limit together.
+        $pdo->exec('BEGIN IMMEDIATE');
+        try {
+            // Expired windows are never read again.
+            $pdo->prepare('DELETE FROM panel_rate_limits WHERE window_start < ?')->execute([$now - 86400]);
+            $pdo->prepare(
+                'INSERT INTO panel_rate_limits (bucket, identity, window_start, hits) VALUES (?, ?, ?, 1)
+                 ON CONFLICT(bucket, identity, window_start) DO UPDATE SET hits = hits + 1'
+            )->execute([$bucket, $identity, $window]);
 
-        $stmt = $pdo->prepare(
-            'SELECT hits FROM panel_rate_limits WHERE bucket = ? AND identity = ? AND window_start = ?'
-        );
-        $stmt->execute([$bucket, $identity, $window]);
-        return (int)$stmt->fetchColumn() <= $limit;
+            $stmt = $pdo->prepare(
+                'SELECT hits FROM panel_rate_limits WHERE bucket = ? AND identity = ? AND window_start = ?'
+            );
+            $stmt->execute([$bucket, $identity, $window]);
+            $hits = (int)$stmt->fetchColumn();
+            $pdo->exec('COMMIT');
+        } catch (\Throwable $e) {
+            $pdo->exec('ROLLBACK');
+            throw $e;
+        }
+
+        return $hits <= $limit;
     }
 
     /** Key for rate limiting: the client address, hashed so it is not stored raw. */

@@ -54,7 +54,12 @@
     <a href="/settings/alerts"><?= t('nav.alerts') ?></a>
     <a href="/myapi"><?= t('nav.myapi') ?></a>
     <?php if (($user['role'] ?? '') === 'admin'): ?><a href="/admin/users"><?= t('nav.admin') ?></a><?php endif; ?>
-    <span class="right"><?= htmlspecialchars((string)($user['username'] ?? '')) ?> · <a href="/logout"><?= t('nav.logout') ?></a></span>
+    <span class="right"><?= htmlspecialchars((string)($user['username'] ?? '')) ?> ·
+      <form method="post" action="/logout" style="display:inline;margin:0;">
+        <input type="hidden" name="csrf" value="<?= htmlspecialchars(\NightPanel\Auth::csrfToken()) ?>">
+        <button type="submit" style="background:none;border:0;padding:0;margin:0;color:inherit;text-decoration:underline;cursor:pointer;font:inherit;"><?= t('nav.logout') ?></button>
+      </form>
+    </span>
   <?php endif; ?>
   <span class="<?= $user !== null ? '' : 'right' ?>" style="display:inline-flex;align-items:center;gap:6px;">
     <span class="hint"><?= t('lang.switch') ?></span>

@@ -92,35 +92,16 @@ function validUsername(string $username): bool
 
 /**
  * Provision a user inside the single Nightscout instance:
- *  1. ensure store[<username>] exists in the active profile record
- *  2. create the per-user role with scoped profile permissions
- *  3. create the subject bound to that role
+ *  1. create the per-user role with scoped profile permissions
+ *  2. create the subject bound to that role
+ *  3. attach store[<username>] to the current profile record
  * All three steps are idempotent, so a retry after a partial failure heals.
  */
 function provisionUser(string $username): array
 {
     $client = nsClient();
 
-    // 1. profile store entry
-    $record = $client->currentProfileRecord();
-    if ($record === null) {
-        // First ever profile document: create it with the user's default entry.
-        $default = defaultProfileTemplate();
-        $client->requestOrThrow('POST', '/api/v1/profile.json', [
-            'store' => [$username => $default],
-            'defaultProfile' => $username,
-            'startDate' => gmdate('c'),
-        ]);
-    } else {
-        $store = $record['store'] ?? [];
-        if (!isset($store[$username])) {
-            $store[$username] = defaultProfileTemplate();
-            $record['store'] = $store;
-            $client->requestOrThrow('PUT', '/api/v1/profile.json', $record);
-        }
-    }
-
-    // 2. role with scoped profile grants (write-only data permissions)
+    // 1. role with scoped profile grants (write-only data permissions)
     $roleName = $username . '-profile';
     $permissions = [
         'api:profile:' . $username . ':read',
@@ -137,22 +118,44 @@ function provisionUser(string $username): array
     try {
         $client->createRole($roleName, $permissions);
     } catch (NsException $e) {
-        if (strpos($e->getMessage(), '400') === false) {
+        if ($e->httpStatus() !== 400) {
             throw $e;
         }
         // already exists from a previous attempt - keep going
     }
 
-    // 3. subject
+    // 2. subject
     $subject = $client->createSubject($username, [$roleName]);
     if (empty($subject['accessToken'])) {
         throw new NsException('Nightscout did not return an access token for the new subject.');
+    }
+    $token = (string)$subject['accessToken'];
+
+    // 3. profile store entry, written with the USER token. Nightscout merges a
+    // scoped PUT into the live record, so two registrations racing here cannot
+    // overwrite each other's store entry the way an admin read-modify-write
+    // would (the second write would reintroduce the first write's stale store).
+    $record = $client->currentProfileRecord();
+    $own = defaultProfileTemplate();
+    $alreadyThere = $record !== null && isset($record['store'][$username]);
+    if ($record === null) {
+        // No profile record exists yet: a scoped create makes the first one.
+        $client->requestOrThrow('POST', '/api/v1/profile.json', [
+            'store' => [$username => $own],
+            'defaultProfile' => $username,
+            'startDate' => gmdate('c'),
+        ], $token);
+    } elseif (!$alreadyThere) {
+        $client->requestOrThrow('PUT', '/api/v1/profile.json', [
+            '_id' => (string)$record['_id'],
+            'store' => [$username => $own],
+        ], $token);
     }
 
     return [
         'subjectId' => (string)$subject['_id'],
         'roleName' => $roleName,
-        'token' => (string)$subject['accessToken'],
+        'token' => $token,
     ];
 }
 
@@ -402,6 +405,14 @@ try {
             exit;
 
         case $path === '/logout':
+            // POST + CSRF: a bare GET (an <img> on another site) must not be
+            // able to sign the user out.
+            if ($method !== 'POST') {
+                http_response_code(405);
+                header('Allow: POST');
+                break;
+            }
+            Auth::assertCsrf($_POST['csrf'] ?? null);
             Auth::logout();
             header('Location: /login');
             exit;
@@ -471,11 +482,18 @@ try {
                 ]);
             } catch (\PDOException $e) {
                 // Two registrations can pass findUser() at once; the unique
-                // index picks a winner. Undo the loser's Nightscout subject.
+                // index picks a winner. Undo the loser's Nightscout subject and
+                // role so no orphan grant is left behind.
+                $client = nsClient();
                 try {
-                    nsClient()->deleteSubject((string)$provisioned['subjectId']);
+                    $client->deleteSubject((string)$provisioned['subjectId']);
                 } catch (NsException $ignored) {
                     // already gone, or Nightscout unreachable: nothing to undo
+                }
+                try {
+                    $client->deleteRoleByName((string)$provisioned['roleName']);
+                } catch (NsException $ignored) {
+                    // same
                 }
                 view('register', ['error' => Lang::t('val.usernameTaken'), 'success' => null, 'info' => null]);
                 break;
@@ -505,8 +523,23 @@ try {
             // without it the default window is "today" (the client narrows it
             // to its selected hour span). Reads come from the local mirror.
             if (!empty($_GET['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$_GET['date'])) {
-                $startMs = strtotime($_GET['date'] . ' 00:00:00') * 1000;
-                $endMs = strtotime($_GET['date'] . ' 23:59:59') * 1000 + 60000;
+                $date = (string)$_GET['date'];
+                // The day is the user's day, not the server's: build its bounds
+                // in their profile timezone so a UTC host does not shift the
+                // window by the offset (Asia/Chongqing would be 8 hours off).
+                $tz = new \DateTimeZone('UTC');
+                try {
+                    $own = Mirror::profileRecord()['store'][$user['username']] ?? [];
+                    $tzName = (string)($own['timezone'] ?? '');
+                    if ($tzName !== '') {
+                        $tz = new \DateTimeZone($tzName);
+                    }
+                } catch (\Throwable $e) {
+                    // Unknown timezone in the profile: fall back to UTC.
+                }
+                $dayStart = new \DateTimeImmutable($date . ' 00:00:00', $tz);
+                $startMs = $dayStart->getTimestamp() * 1000;
+                $endMs = $dayStart->modify('+1 day')->getTimestamp() * 1000;
             } else {
                 $endMs = (int)round(microtime(true) * 1000);
                 $startMs = $endMs - 30 * 3600 * 1000;
@@ -1035,6 +1068,11 @@ try {
             if ($victim !== false) {
                 if (!empty($victim['ns_subject_id'])) {
                     try { nsClient()->deleteSubject((string)$victim['ns_subject_id']); } catch (NsException $e) { /* keep going */ }
+                }
+                // The Nightscout role is per-user too; leaving it behind leaves
+                // an orphan grant that a future same-name registration inherits.
+                if (!empty($victim['ns_role_name'])) {
+                    try { nsClient()->deleteRoleByName((string)$victim['ns_role_name']); } catch (NsException $e) { /* keep going */ }
                 }
                 // The mirror tables predate foreign keys, so remove their rows
                 // explicitly instead of leaving orphaned data behind.

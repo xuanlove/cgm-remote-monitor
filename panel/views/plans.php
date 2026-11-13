@@ -1,4 +1,4 @@
-<h1><?= t('plans.title') ?> <span class="hint" style="font-size:13px;">· <?= t('plans.subtitle', ['name' => $user['username']]) ?></span></h1>
+<h1><?= t('plans.title') ?> <span class="hint" style="font-size:13px;">· <?= t('plans.subtitle', ['name' => htmlspecialchars((string)$user['username'])]) ?></span></h1>
 
 <?php if (!empty($error)): ?><p class="msg-bad"><?= htmlspecialchars($error) ?></p><?php endif; ?>
 <?php if (!empty($success)): ?><p class="msg-ok"><?= htmlspecialchars($success) ?></p><?php endif; ?>

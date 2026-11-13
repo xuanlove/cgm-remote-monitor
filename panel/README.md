@@ -49,10 +49,11 @@ server {
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
     }
     location ~ ^/(data|lib|lang|tests|bin)/ { deny all; }
+    location = /glucose-trend-demo.html { deny all; }
 }
 ```
 
-Apache 部署时，仓库根目录的 `panel/.htaccess` 提供同等拒绝规则（`data/`、`lib/`、`bin/`、`tests/`、`lang/`）；内置开发服务器则由 `router.php` 拦截。
+Apache 部署时，仓库根目录的 `panel/.htaccess` 提供同等拒绝规则（`data/`、`lib/`、`bin/`、`tests/`、`lang/` 及开发演示页）；内置开发服务器则由 `router.php` 拦截。
 
 php-fpm 会清空环境变量，务必在 pool 配置里显式传入：
 
@@ -65,7 +66,7 @@ env[PANEL_DB] = /var/lib/nightpanel/panel.db
 env[PANEL_TRUST_PROXY] = 1
 ```
 
-`panel/data/`（或 `PANEL_DB` 所在目录）需允许 php-fpm 与 cron 的同一用户读写；启用 OPcache。
+`panel/data/`（或 `PANEL_DB` 所在目录）需允许 php-fpm 与 cron 的同一用户读写，且**不能位于 Web 根目录内**：数据库、`<db>.key`（密钥种子）与 `wal/shm` 文件都在那里。启用 OPcache。
 
 ### 计划任务
 
@@ -138,7 +139,7 @@ php bin/sync.php --profiles
 | `NIGHTSCOUT_URL` | Nightscout 地址（也可在 /admin/users 页配置） |
 | `NIGHTSCOUT_ADMIN_SECRET` | Nightscout API_SECRET 原文（面板用于管理 API） |
 | `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASS` | 初始管理员（仅首次建库时生效） |
-| `PANEL_SECRET_KEY` | token/密钥加密密钥；未设置时自动生成并落库。`ns_secret` 以 AES-256-GCM 加密存储（`enc:v1:` 前缀），旧版明文值仍可读取 |
+| `PANEL_SECRET_KEY` | token/密钥加密密钥。未设置时自动生成并写入 `PANEL_DB` 同目录的 `<db>.key`（权限 0600），**绝不落在数据库内**——否则一份 `panel.db` 同时带走密文与密钥。从旧版本升级会自动把 `panel_settings.key_seed` 迁移到该文件。`ns_secret` 以 AES-256-GCM 加密存储（`enc:v1:` 前缀），旧版明文值仍可读取 |
 | `PANEL_DB` | SQLite 路径（默认 `panel/data/panel.db`；生产建议放到独立可写目录） |
 | `PANEL_TRUST_PROXY` | 设为 `1` 时信任 `X-Forwarded-Proto`（反向代理终止 TLS 时用于 `Secure` cookie）。未设置时仅当对端是回环/内网地址才信任 |
 
@@ -184,8 +185,9 @@ api:entries/treatments/activity/devicestatus:create   上传数据
 
 - 所有页面响应带 `X-Content-Type-Options`、`X-Frame-Options: DENY`、`Referrer-Policy: same-origin` 与限制为本源的 CSP（内联脚本/样式仍需 `'unsafe-inline'`）。
 - 模板里的 JS 数据一律走 `js_json()`（`JSON_HEX_*`），动态列表用 `textContent` 构建，Nightscout 返回的备注不会变成可执行 HTML。
-- `ns_secret` 加密落库；`data/`、`lib/` 等目录在 nginx / Apache / 内置服务器三处都拒绝直接访问。
+- `ns_secret` 加密落库，密钥种子存放在数据库之外（`<db>.key`，0600）；`data/`、`lib/` 等目录在 nginx / Apache / 内置服务器三处都拒绝直接访问。
 - 登录按客户端地址 20 次/15 分钟、注册 10 次/小时限流（`panel_rate_limits`，IP 以 SHA-256 存储）。
+- 退出登录是 POST + CSRF（`GET /logout` 返回 405），外部页面无法用一张图片把你登出。
 - 导出接口强制 `Content-Disposition: attachment`；`/data/*.json` 仅登录用户可读。
 
 ## 测试

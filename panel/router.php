@@ -3,8 +3,11 @@
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
 // The SQLite mirror, WAL files, the sync lock and dotfiles are private; the
-// built-in server would otherwise hand them out as static files.
-if (preg_match('#(^|/)\\.#', $path) === 1 || preg_match('#^/data(/|$)#i', $path) === 1) {
+// built-in server would otherwise hand them out as static files. The design
+// demo page is a development artefact and is not part of the panel.
+if (preg_match('#(^|/)\\.#', $path) === 1
+    || preg_match('#^/data(/|$)#i', $path) === 1
+    || $path === '/glucose-trend-demo.html') {
     http_response_code(404);
     echo 'Not found';
     return true;
