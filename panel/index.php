@@ -113,6 +113,7 @@ function provisionUser(string $username): array
     $permissions = [
         'api:profile:' . $username . ':read',
         'api:profile:' . $username . ':write',
+        'api:profile:' . $username . ':create',
         'api:entries:create',
         'api:treatments:create',
         'api:activity:create',
@@ -151,7 +152,7 @@ function defaultProfileTemplate(): array
         'target_low' => [[0, 80]],
         'target_high' => [[0, 130]],
         'basal' => [[0, 1]],
-        'timezone' => 'UTC',
+        'timezone' => 'Asia/Chongqing',
     ];
 }
 

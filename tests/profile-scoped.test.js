@@ -81,7 +81,7 @@ describe('Profile API scoped access (api:profile:<name>:read/write)', function (
     store[BOB] = profileFor(90, 140);
     await profileCollection().updateOne({ _id: profileRecord._id }, { $set: { store: store } });
 
-    // A role granting alice scoped read/write of her own store entry only,
+    // A role granting alice scoped read/write/create of her own store entry only,
     // plus a write-only entries permission (she must not read any data).
     await new Promise(function (resolve, reject) {
       self.ctx.authorization.storage.createRole({
@@ -89,6 +89,7 @@ describe('Profile API scoped access (api:profile:<name>:read/write)', function (
         , permissions: [
           'api:profile:' + ALICE + ':read'
           , 'api:profile:' + ALICE + ':write'
+          , 'api:profile:' + ALICE + ':create'
           , 'api:entries:create'
         ]
       }, function created (err) {
@@ -222,14 +223,48 @@ describe('Profile API scoped access (api:profile:<name>:read/write)', function (
     stored.store[BOB].target_high.should.deepEqual([[0, 140]]);
   });
 
-  it('a scoped token cannot create or delete profile records', async function () {
-    const current = await wholeDocumentFromDb();
-
-    await request(self.app)
+  it('a scoped POST creates a new record containing only its own store entry', async function () {
+    const newStore = {};
+    newStore[ALICE] = profileFor(70, 160);
+    const created = await request(self.app)
       .post('/api/v1/profile/')
       .set('api-secret', aliceToken)
-      .send({ store: {} })
+      .send({ store: newStore })
+      .expect(200);
+
+    created.body.should.be.an.Array().and.have.length(1);
+    Object.keys(created.body[0].store).should.deepEqual([ALICE]);
+    created.body[0].defaultProfile.should.equal(ALICE);
+
+    // Two records now: the shared original plus alice's treatment-plan record.
+    (await profileCollection().countDocuments({ })).should.equal(2);
+
+    // bob, who has no profile grants at all, is still refused.
+    await request(self.app)
+      .post('/api/v1/profile/')
+      .set('api-secret', bobToken)
+      .send({ store: newStore })
       .expect(401);
+
+    // clean up so later tests see the original single-document state
+    await profileCollection().deleteOne({ defaultProfile: ALICE, startDate: { $ne: '1970-01-01T00:00:00.000Z' } });
+  });
+
+  it('a scoped PUT refuses to create records for another user', async function () {
+    const foreignStore = {};
+    foreignStore[BOB] = profileFor(10, 20);
+    const refused = await request(self.app)
+      .post('/api/v1/profile/')
+      .set('api-secret', aliceToken)
+      .send({ store: foreignStore })
+      .expect(403);
+
+    refused.body.description.should.containEql('scope violation');
+    (await profileCollection().countDocuments({ })).should.equal(1);
+  });
+
+  it('a scoped token cannot delete profile records', async function () {
+    const current = await wholeDocumentFromDb();
 
     await request(self.app)
       .delete('/api/v1/profile/' + current._id.toString())
