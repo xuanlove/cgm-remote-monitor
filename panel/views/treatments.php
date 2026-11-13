@@ -99,9 +99,9 @@ foreach ($fields as $name => $def) {
 
 <?php if (!empty($editing)): ?>
 <script>
-const TYPES = <?= json_encode($jsTypes, JSON_UNESCAPED_UNICODE) ?>;
-const FIELDS = <?= json_encode($jsFields, JSON_UNESCAPED_UNICODE) ?>;
-const RECORD = <?= json_encode($editing, JSON_UNESCAPED_UNICODE) ?>;
+const TYPES = <?= js_json($jsTypes) ?>;
+const FIELDS = <?= js_json($jsFields) ?>;
+const RECORD = <?= js_json($editing) ?>;
 
 const typeSelect = document.getElementById('editEventType');
 const container = document.getElementById('editFields');
@@ -120,7 +120,10 @@ function renderFields () {
     const def = FIELDS[name];
     if (!def) return;
     const wrap = document.createElement('div');
-    wrap.innerHTML = '<label for="e_' + name + '">' + def.label + (def.unit ? ' (' + def.unit + ')' : '') + '</label>';
+    const label = document.createElement('label');
+    label.htmlFor = 'e_' + name;
+    label.textContent = def.label + (def.unit ? ' (' + def.unit + ')' : '');
+    wrap.appendChild(label);
     const input = document.createElement('input');
     input.id = 'e_' + name;
     input.name = name;

@@ -32,6 +32,7 @@ return [
     'login.noAccount' => 'No account yet?',
     'login.register' => 'Register',
     'login.invalid' => 'Wrong username or password',
+    'login.tooMany' => 'Too many attempts; try again in 15 minutes',
 
     // ------------------------------------------------------------- register
     'register.title' => 'Register',
@@ -45,6 +46,7 @@ return [
     'register.passwordLabel' => 'Password (at least 8 characters)',
     'register.submit' => 'Register and provision',
     'register.hint' => 'Registration creates your own profile entry and a restricted API token inside Nightscout automatically.',
+    'register.tooMany' => 'Too many registrations; try again in an hour',
 
     // ------------------------------------------------------------ dashboard
     'dash.title' => 'Glucose trend',
@@ -290,6 +292,10 @@ return [
     'alert.lowTitle' => 'Low glucose alert',
     'alert.highTitle' => 'High glucose alert',
     'alert.body' => ':value mmol/L (alert line :limit mmol/L)',
+    'alert.err.number' => 'Alert thresholds must be numbers',
+    'alert.err.lowRange' => 'The low alert must be between :min and :max mmol/L',
+    'alert.err.highRange' => 'The high alert must be between :min and :max mmol/L',
+    'alert.err.order' => 'The low alert must be below the high alert',
 
     // ------------------------------------------------------ table headers
     'col.time' => 'Time',

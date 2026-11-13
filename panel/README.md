@@ -20,7 +20,7 @@
 ```
 浏览器 ──> nginx/Apache ──> php-fpm ──> SQLite 镜像（毫秒级，只读）
                               │
-                              └─ 写入类操作 ──> Nightscout API（成功即触发该用户增量同步）
+                              └─ 写入类操作 ──> Nightscout API（返回记录直接写回镜像）
 
 cron/systemd timer ──> panel/bin/sync.php ──> Nightscout API
 ```
@@ -28,7 +28,7 @@ cron/systemd timer ──> panel/bin/sync.php ──> Nightscout API
 - Web 请求**不再直接访问 Nightscout**：`/data/*.json`、报告、导出、Profile/治疗列表全部读 `panel_entries` / `panel_treatments` / `panel_devicestatus` / `panel_profiles`。
 - `bin/sync.php` 按用户增量拉取：每条流在 `panel_sync_state` 里保存毫秒游标，并回看 6 小时重叠窗口（CGM 补传不会漏），按 Nightscout `_id` 幂等 upsert。
 - 实时性由 30 秒轮询替代原 SSE，不再长期占用 php-fpm worker。
-- 写入（填写数据 / 治疗编辑 / Profile / 方案）仍直连 Nightscout（源数据），成功后同步触发一次该用户增量同步，因此列表立即可见。
+- 写入（填写数据 / 治疗编辑）成功后，用 Nightscout 返回的记录直接更新本地镜像，请求内不再额外拉取整条流；Profile / 治疗方案的写路径**实时读取** Nightscout 当前文档（避免用陈旧镜像覆盖他人档案），成功后刷新一次 Profile 快照。
 - 数据新鲜度：`/data/glucose.json` 返回 `sync.age_sec` 并带 `X-Data-Age` 头；仪表盘超过 10 分钟显示「数据延迟」。
 
 ### 生产部署（php-fpm + nginx）
@@ -52,6 +52,8 @@ server {
 }
 ```
 
+Apache 部署时，仓库根目录的 `panel/.htaccess` 提供同等拒绝规则（`data/`、`lib/`、`bin/`、`tests/`、`lang/`）；内置开发服务器则由 `router.php` 拦截。
+
 php-fpm 会清空环境变量，务必在 pool 配置里显式传入：
 
 ```ini
@@ -60,6 +62,7 @@ env[NIGHTSCOUT_URL] = http://127.0.0.1:1337
 env[NIGHTSCOUT_ADMIN_SECRET] = <API_SECRET>
 env[PANEL_SECRET_KEY] = <32 位随机串>
 env[PANEL_DB] = /var/lib/nightpanel/panel.db
+env[PANEL_TRUST_PROXY] = 1
 ```
 
 `panel/data/`（或 `PANEL_DB` 所在目录）需允许 php-fpm 与 cron 的同一用户读写；启用 OPcache。
@@ -76,7 +79,7 @@ env[PANEL_DB] = /var/lib/nightpanel/panel.db
 # 每天 03:05：30 天全量校准（修复游标漂移 / 补历史）
 5 3 * * *   php /var/www/cgm-remote-monitor/panel/bin/sync.php --full --days=30 >> /var/log/nightpanel-sync.log 2>&1
 
-# 每天 03:30：保留策略清理
+# 每天 03:30：保留策略清理（血糖 120 天、治疗 365 天、日志 7 天、告警事件 30 天）
 30 3 * * *  php /var/www/cgm-remote-monitor/panel/bin/cleanup.php >> /var/log/nightpanel-cleanup.log 2>&1
 ```
 
@@ -135,8 +138,9 @@ php bin/sync.php --profiles
 | `NIGHTSCOUT_URL` | Nightscout 地址（也可在 /admin/users 页配置） |
 | `NIGHTSCOUT_ADMIN_SECRET` | Nightscout API_SECRET 原文（面板用于管理 API） |
 | `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASS` | 初始管理员（仅首次建库时生效） |
-| `PANEL_SECRET_KEY` | token/密钥加密密钥；未设置时自动生成并落库 |
+| `PANEL_SECRET_KEY` | token/密钥加密密钥；未设置时自动生成并落库。`ns_secret` 以 AES-256-GCM 加密存储（`enc:v1:` 前缀），旧版明文值仍可读取 |
 | `PANEL_DB` | SQLite 路径（默认 `panel/data/panel.db`；生产建议放到独立可写目录） |
+| `PANEL_TRUST_PROXY` | 设为 `1` 时信任 `X-Forwarded-Proto`（反向代理终止 TLS 时用于 `Secure` cookie）。未设置时仅当对端是回环/内网地址才信任 |
 
 ## 功能页
 
@@ -176,6 +180,14 @@ api:entries/treatments/activity/devicestatus:create   上传数据
 - 图表、动态表单字段、CSV 表头、错误与成功提示都走同一套字典；`html lang` 与 JS 的日期格式随语言切换
 - 新增文案只需在两个字典里各加一行；`php panel/tests/lang-test.php` 会校验两份字典 key 完全一致、占位符一致，并扫描代码中用到的 key 是否都已定义
 
+## 安全基线
+
+- 所有页面响应带 `X-Content-Type-Options`、`X-Frame-Options: DENY`、`Referrer-Policy: same-origin` 与限制为本源的 CSP（内联脚本/样式仍需 `'unsafe-inline'`）。
+- 模板里的 JS 数据一律走 `js_json()`（`JSON_HEX_*`），动态列表用 `textContent` 构建，Nightscout 返回的备注不会变成可执行 HTML。
+- `ns_secret` 加密落库；`data/`、`lib/` 等目录在 nginx / Apache / 内置服务器三处都拒绝直接访问。
+- 登录按客户端地址 20 次/15 分钟、注册 10 次/小时限流（`panel_rate_limits`，IP 以 SHA-256 存储）。
+- 导出接口强制 `Content-Disposition: attachment`；`/data/*.json` 仅登录用户可读。
+
 ## 测试
 
 Nightscout 权限改造的单元测试：`tests/profile-scoped.test.js`
@@ -190,5 +202,6 @@ npx env-cmd -f ./tests/ci.test.env npx mocha --timeout 30000 --require ./tests/h
 php panel/tests/glucose-stats-test.php
 php panel/tests/alerts-test.php
 php panel/tests/lang-test.php
-php panel/tests/mirror-test.php    # 镜像表结构、按用户隔离、游标/新鲜度、告警事件
+php panel/tests/mirror-test.php    # 镜像表结构、按用户隔离、游标/新鲜度、告警事件、密钥加密、限流
+php panel/tests/views-xss-test.php # 视图 XSS 回归（js_json 转义、DOM 文本节点）
 ```

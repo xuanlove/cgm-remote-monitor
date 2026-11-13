@@ -79,10 +79,10 @@ foreach (['bolus', 'monitor', 'temp', 'care'] as $group) {
 </div>
 
 <script>
-const TYPES = <?= json_encode($jsTypes, JSON_UNESCAPED_UNICODE) ?>;
-const FIELDS = <?= json_encode($jsFields, JSON_UNESCAPED_UNICODE) ?>;
-const GROUPS = <?= json_encode($jsGroups, JSON_UNESCAPED_UNICODE) ?>;
-const PRESET = <?= json_encode($preset ?? '', JSON_UNESCAPED_UNICODE) ?>;
+const TYPES = <?= js_json($jsTypes) ?>;
+const FIELDS = <?= js_json($jsFields) ?>;
+const GROUPS = <?= js_json($jsGroups) ?>;
+const PRESET = <?= js_json($preset ?? '') ?>;
 
 const typeSelect = document.getElementById('eventType');
 const container = document.getElementById('dynamicFields');
@@ -110,7 +110,10 @@ function renderFields () {
     if (!def) return;
     const wrap = document.createElement('div');
     const id = 'f_' + name;
-    wrap.innerHTML = '<label for="' + id + '">' + def.label + (def.unit ? ' (' + def.unit + ')' : '') + '</label>';
+    const label = document.createElement('label');
+    label.htmlFor = id;
+    label.textContent = def.label + (def.unit ? ' (' + def.unit + ')' : '');
+    wrap.appendChild(label);
     const input = document.createElement('input');
     input.id = id;
     input.name = name;
@@ -128,7 +131,7 @@ function renderFields () {
   // Profile Switch defaults to the user's own plan name.
   if (typeSelect.value === 'Profile Switch') {
     const prof = document.getElementById('f_profile');
-    if (prof && !prof.value) prof.value = <?= json_encode($user['username']) ?>;
+    if (prof && !prof.value) prof.value = <?= js_json($user['username']) ?>;
   }
 }
 

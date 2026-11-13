@@ -36,12 +36,14 @@ if (isset($opts['help'])) {
     exit(0);
 }
 
-$dataDir = __DIR__ . '/../data';
-if (!is_dir($dataDir)) {
-    mkdir($dataDir, 0770, true);
+// The lock lives beside the database (PANEL_DB aware), so two installs on one
+// host but with separate databases do not block each other.
+$lockFile = Db::file() . '.sync.lock';
+$lockDir = dirname($lockFile);
+if (!is_dir($lockDir)) {
+    mkdir($lockDir, 0770, true);
 }
-
-$lock = fopen($dataDir . '/sync.lock', 'c');
+$lock = fopen($lockFile, 'c');
 if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
     fwrite(STDERR, "sync: another run is already in progress\n");
     exit(2);

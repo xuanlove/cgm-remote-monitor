@@ -24,7 +24,7 @@ final class Config
         if ($env !== false && $env !== '') {
             return $env;
         }
-        return (string)(Db::setting('ns_secret') ?? '');
+        return (string)(Db::secret('ns_secret') ?? '');
     }
 
     /** Shared client for panel-originated calls (reads and admin writes). */

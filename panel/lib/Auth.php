@@ -16,11 +16,33 @@ final class Auth
             session_set_cookie_params([
                 'httponly' => true,
                 'samesite' => 'Lax',
-                'secure' => (($_SERVER['HTTPS'] ?? '') !== ''),
+                'secure' => self::isHttps(),
             ]);
             session_name('nightpanel');
             session_start();
         }
+    }
+
+    /**
+     * Whether the request reached us over HTTPS. nginx terminating TLS reports
+     * plain HTTP to php-fpm, so X-Forwarded-Proto is honoured, but only from a
+     * loopback/private peer (or when PANEL_TRUST_PROXY=1) to keep a direct
+     * client from forcing Secure cookies on a plain-HTTP install.
+     */
+    private static function isHttps(): bool
+    {
+        $https = strtolower((string)($_SERVER['HTTPS'] ?? ''));
+        if ($https !== '' && $https !== 'off') {
+            return true;
+        }
+        if (strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) !== 'https') {
+            return false;
+        }
+        if (getenv('PANEL_TRUST_PROXY') === '1') {
+            return true;
+        }
+        $remote = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+        return filter_var($remote, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false;
     }
 
     public static function csrfToken(): string

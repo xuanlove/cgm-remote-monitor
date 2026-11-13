@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
+
 /**
  * Self-check for the local mirror (panel/lib/Mirror.php) and the schema added
  * for the scheduled sync. Runs standalone: php panel/tests/mirror-test.php
@@ -77,6 +82,9 @@ check('sgv is converted to mmol/L', abs($readings[2]['v'] - 8.5) < 0.01);
 check('direction and delta survive', $readings[1]['direction'] === 'SingleUp' && $readings[1]['delta'] === 6.0);
 check('dateString is generated when absent', str_starts_with($readings[0]['dateString'], '20'));
 
+$statsReadings = Mirror::statsReadings(1, $now - 3600000, $now + 60000);
+check('statsReadings keeps only ts and mmol', count($statsReadings) === 3 && array_keys($statsReadings[0]) === ['ts', 'v']);
+
 $raw = Mirror::rawEntries(1, 'sgv', $now - 3600000, $now + 60000, 2);
 check('rawEntries honours the newest-N limit', count($raw) === 2);
 check('rawEntries keeps uploader fields', $raw[1]['_id'] === 'e3' && $raw[1]['device'] === 'alice');
@@ -128,6 +136,20 @@ check('acked events disappear from the feed', Mirror::undeliveredAlerts(1, $now 
 check('ackAlerts ignores foreign ids', Mirror::ackAlerts(2, [1]) === 0);
 
 check('syncState lists the user streams', count(Mirror::syncState(1)) === 1);
+
+// M1: the Nightscout admin secret must not sit in the settings table as-is.
+Db::setSecret('ns_secret', 'shiro-secret');
+$storedSecret = (string)Db::setting('ns_secret');
+check('setSecret stores ciphertext', $storedSecret !== 'shiro-secret' && str_starts_with($storedSecret, 'enc:v1:'));
+check('secret() decrypts the stored value', Db::secret('ns_secret') === 'shiro-secret');
+Db::setSetting('ns_secret', 'legacy-plaintext');
+check('secret() still reads legacy plaintext', Db::secret('ns_secret') === 'legacy-plaintext');
+
+// M5: fixed-window throttling.
+check('rateLimit allows attempts inside the window', Db::rateLimit('test', 'k', 2, 60));
+check('rateLimit allows the limit itself', Db::rateLimit('test', 'k', 2, 60));
+check('rateLimit blocks past the limit', !Db::rateLimit('test', 'k', 2, 60));
+check('rateLimit keeps identities apart', Db::rateLimit('test', 'other', 2, 60));
 
 @unlink($dbFile);
 @unlink($dbFile . '-wal');

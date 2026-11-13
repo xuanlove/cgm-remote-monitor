@@ -47,6 +47,34 @@ final class Mirror
     }
 
     /**
+     * Minimal projection for the statistics page: time and mmol/L only.
+     *
+     * Median, sample deviation and hypo-episode detection all need the ordered
+     * series, so the rows are read instead of aggregated in SQL; dropping the
+     * unused columns and the per-row ISO timestamp keeps a 90-day window light.
+     *
+     * @return array<int,array{ts:int,v:float}>
+     */
+    public static function statsReadings(int $userId, int $startMs, int $endMs): array
+    {
+        $stmt = Db::pdo()->prepare(
+            'SELECT ts, sgv FROM panel_entries
+              WHERE user_id = ? AND type = \'sgv\' AND ts >= ? AND ts < ?
+              ORDER BY ts'
+        );
+        $stmt->execute([$userId, $startMs, $endMs]);
+
+        $out = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $out[] = [
+                'ts' => (int)$row['ts'],
+                'v' => round((float)$row['sgv'] / self::MGDL_TO_MMOL, 2),
+            ];
+        }
+        return $out;
+    }
+
+    /**
      * Raw Nightscout entry objects for the dashboard (already JSON-encoded in
      * the mirror, so extra uploader fields survive unchanged).
      *
@@ -251,6 +279,75 @@ final class Mirror
         $stmt = Db::pdo()->prepare('SELECT * FROM panel_sync_state WHERE user_id = ? ORDER BY stream');
         $stmt->execute([$userId]);
         return $stmt->fetchAll();
+    }
+
+    /**
+     * Store a treatment the panel just wrote. Lists read the mirror, so the new
+     * record shows up immediately without a second trip to Nightscout.
+     */
+    public static function storeTreatment(int $userId, array $record): void
+    {
+        $nsId = (string)($record['_id'] ?? '');
+        $createdAt = (string)($record['created_at'] ?? '');
+        if ($nsId === '' || $createdAt === '') {
+            return;
+        }
+        $stmt = Db::pdo()->prepare(
+            'INSERT INTO panel_treatments (user_id, ns_id, created_at, event_type, payload, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(user_id, ns_id) DO UPDATE SET
+                created_at = excluded.created_at,
+                event_type = excluded.event_type,
+                payload = excluded.payload,
+                updated_at = excluded.updated_at'
+        );
+        $stmt->execute([
+            $userId,
+            $nsId,
+            $createdAt,
+            isset($record['eventType']) ? (string)$record['eventType'] : null,
+            json_encode($record, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            gmdate('c'),
+        ]);
+    }
+
+    /** Drop a treatment the panel just deleted. */
+    public static function forgetTreatment(int $userId, string $nsId): void
+    {
+        $stmt = Db::pdo()->prepare('DELETE FROM panel_treatments WHERE user_id = ? AND ns_id = ?');
+        $stmt->execute([$userId, $nsId]);
+    }
+
+    /** Store an sgv entry the panel just wrote. */
+    public static function storeEntry(int $userId, array $record, string $device): void
+    {
+        $ts = (int)($record['date'] ?? 0);
+        $nsId = (string)($record['_id'] ?? '');
+        if ($ts <= 0 || $nsId === '') {
+            return;
+        }
+        $stmt = Db::pdo()->prepare(
+            'INSERT INTO panel_entries (user_id, ns_id, type, device, ts, sgv, direction, delta, raw)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(user_id, ns_id) DO UPDATE SET
+                ts = excluded.ts,
+                sgv = excluded.sgv,
+                direction = excluded.direction,
+                delta = excluded.delta,
+                raw = excluded.raw,
+                fetched_at = CURRENT_TIMESTAMP'
+        );
+        $stmt->execute([
+            $userId,
+            $nsId,
+            'sgv',
+            (string)($record['device'] ?? $device),
+            $ts,
+            isset($record['sgv']) ? (float)$record['sgv'] : null,
+            isset($record['direction']) ? (string)$record['direction'] : null,
+            isset($record['delta']) ? (float)$record['delta'] : null,
+            json_encode($record, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+        ]);
     }
 
     /**

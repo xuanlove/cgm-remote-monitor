@@ -1,6 +1,11 @@
 <?php
 declare(strict_types=1);
 
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
+
 /**
  * Plain-PHP checks for GlucoseStats. Run with:  php panel/tests/glucose-stats-test.php
  * Kept dependency-free so it runs anywhere the panel does.

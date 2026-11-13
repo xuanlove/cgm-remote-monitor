@@ -79,8 +79,8 @@ const I18N = <?= \NightPanel\Lang::js([
     'col.edit',
     'col.time',
 ]) ?>;
-const LOCALE = <?= json_encode(\NightPanel\Lang::htmlLang()) ?>;
-const CSRF = <?= json_encode(\NightPanel\Auth::csrfToken()) ?>;
+const LOCALE = <?= js_json(\NightPanel\Lang::htmlLang()) ?>;
+const CSRF = <?= js_json(\NightPanel\Auth::csrfToken()) ?>;
 
 /* mg/dL → mmol/L */
 const MGDL_TO_MMOL = 18;
@@ -211,13 +211,26 @@ async function loadAll() {
   tbody.innerHTML = '';
   (treatments.treatments || []).sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).forEach(t => {
     const row = document.createElement('tr');
-    row.innerHTML = '<td>' + new Date(t.created_at).toLocaleString(LOCALE) + '</td>'
-      + '<td>' + (t.eventType || '-') + '</td>'
-      + '<td>' + (t.glucose ?? '-') + '</td>'
-      + '<td>' + (t.carbs ?? '-') + '</td>'
-      + '<td>' + (t.insulin ?? '-') + '</td>'
-      + '<td>' + (t.notes || '') + '</td>'
-      + '<td><a href="/treatments?edit=' + encodeURIComponent(t._id) + '">' + I18N['col.edit'] + '</a></td>';
+    // Values come from Nightscout, so they are written as text nodes: a note
+    // containing markup must never become live HTML.
+    [
+      new Date(t.created_at).toLocaleString(LOCALE),
+      t.eventType || '-',
+      t.glucose ?? '-',
+      t.carbs ?? '-',
+      t.insulin ?? '-',
+      t.notes || ''
+    ].forEach(value => {
+      const cell = document.createElement('td');
+      cell.textContent = String(value);
+      row.appendChild(cell);
+    });
+    const actions = document.createElement('td');
+    const link = document.createElement('a');
+    link.href = '/treatments?edit=' + encodeURIComponent(t._id);
+    link.textContent = I18N['col.edit'];
+    actions.appendChild(link);
+    row.appendChild(actions);
     tbody.appendChild(row);
   });
 }
@@ -237,7 +250,12 @@ function buildChart(entries, mbgPoints, targetLow, targetHigh) {
 
   if (entries.length === 0 && mbgPoints.length === 0) {
     if (chart) { chart.dispose(); chart = null; }
-    el.innerHTML = '<p class="hint" style="padding:40px;text-align:center;">' + I18N['dash.empty'] + '</p>';
+    el.innerHTML = '';
+    const empty = document.createElement('p');
+    empty.className = 'hint';
+    empty.style.cssText = 'padding:40px;text-align:center;';
+    empty.textContent = I18N['dash.empty'];
+    el.appendChild(empty);
     return;
   }
   // Clear the "no data" placeholder BEFORE the instance is created: wiping the

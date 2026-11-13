@@ -10,18 +10,29 @@ final class Db
 {
     private static ?\PDO $pdo = null;
 
+    /** Bump when a migration step is added; stored in `PRAGMA user_version`. */
+    private const SCHEMA_VERSION = 1;
+
+    /** The resolved database file, so callers can place locks next to it. */
+    public static function file(): string
+    {
+        $env = getenv('PANEL_DB');
+        if ($env !== false && $env !== '') {
+            return $env;
+        }
+        return __DIR__ . '/../data/panel.db';
+    }
+
     public static function pdo(): \PDO
     {
         if (self::$pdo === null) {
-            $dir = __DIR__ . '/../data';
+            $dir = dirname(self::file());
             if (!is_dir($dir)) {
                 mkdir($dir, 0770, true);
             }
             // PANEL_DB lets deployments (and tests) point at another file; the
             // default lives next to the code so a checkout runs out of the box.
-            $env = getenv('PANEL_DB');
-            $file = ($env !== false && $env !== '') ? $env : $dir . '/panel.db';
-            self::$pdo = new \PDO('sqlite:' . $file);
+            self::$pdo = new \PDO('sqlite:' . self::file());
             self::$pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
             self::$pdo->setAttribute(\PDO::ATTR_DEFAULT_FETCH_MODE, \PDO::FETCH_ASSOC);
             // WAL keeps the web readers and the sync CLI from blocking each
@@ -53,6 +64,16 @@ final class Db
             'CREATE TABLE IF NOT EXISTS panel_settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
+            )'
+        );
+        // Fixed-window counters for login/registration throttling.
+        self::$pdo->exec(
+            'CREATE TABLE IF NOT EXISTS panel_rate_limits (
+                bucket TEXT NOT NULL,
+                identity TEXT NOT NULL,
+                window_start INTEGER NOT NULL,
+                hits INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (bucket, identity, window_start)
             )'
         );
         self::$pdo->exec(
@@ -158,6 +179,18 @@ final class Db
             'CREATE INDEX IF NOT EXISTS idx_panel_alert_events_user_ts
                 ON panel_alert_events (user_id, delivered, ts)'
         );
+
+        // Refuse to run against a database written by a newer release, and
+        // stamp the current schema on a fresh (or upgraded) file.
+        $version = (int)self::$pdo->query('PRAGMA user_version')->fetchColumn();
+        if ($version > self::SCHEMA_VERSION) {
+            throw new \RuntimeException(
+                'Panel database schema ' . $version . ' is newer than this code (' . self::SCHEMA_VERSION . ')'
+            );
+        }
+        if ($version < self::SCHEMA_VERSION) {
+            self::$pdo->exec('PRAGMA user_version = ' . self::SCHEMA_VERSION);
+        }
     }
 
     /** Encrypt a secret for storage; the key comes from the environment. */
@@ -215,5 +248,69 @@ final class Db
              ON CONFLICT(key) DO UPDATE SET value = excluded.value'
         );
         $stmt->execute([$key, $value]);
+    }
+
+    /** Marker that separates encrypted values from pre-encryption plaintext. */
+    private const SECRET_PREFIX = 'enc:v1:';
+
+    /**
+     * Read a secret setting (e.g. the Nightscout admin secret). Values written
+     * before encryption was introduced are plaintext and are still returned, so
+     * an existing installation keeps working until the next save.
+     */
+    public static function secret(string $key): ?string
+    {
+        $value = self::setting($key);
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!str_starts_with($value, self::SECRET_PREFIX)) {
+            return $value;
+        }
+        try {
+            return self::decrypt(substr($value, strlen(self::SECRET_PREFIX)));
+        } catch (\RuntimeException $e) {
+            throw new \RuntimeException(
+                'Cannot decrypt ' . $key . '; PANEL_SECRET_KEY was probably changed. Re-enter the value.',
+                0,
+                $e
+            );
+        }
+    }
+
+    /** Encrypt a secret setting at rest. */
+    public static function setSecret(string $key, string $value): void
+    {
+        self::setSetting($key, self::SECRET_PREFIX . self::encrypt($value));
+    }
+
+    /**
+     * Count one attempt in a fixed window; false once the allowance is used up.
+     * `identity` is expected to be a hash, not a raw IP address.
+     */
+    public static function rateLimit(string $bucket, string $identity, int $limit, int $windowSec): bool
+    {
+        $now = time();
+        $window = intdiv($now, $windowSec) * $windowSec;
+        $pdo = self::pdo();
+
+        // Expired windows are never read again.
+        $pdo->prepare('DELETE FROM panel_rate_limits WHERE window_start < ?')->execute([$now - 86400]);
+        $pdo->prepare(
+            'INSERT INTO panel_rate_limits (bucket, identity, window_start, hits) VALUES (?, ?, ?, 1)
+             ON CONFLICT(bucket, identity, window_start) DO UPDATE SET hits = hits + 1'
+        )->execute([$bucket, $identity, $window]);
+
+        $stmt = $pdo->prepare(
+            'SELECT hits FROM panel_rate_limits WHERE bucket = ? AND identity = ? AND window_start = ?'
+        );
+        $stmt->execute([$bucket, $identity, $window]);
+        return (int)$stmt->fetchColumn() <= $limit;
+    }
+
+    /** Key for rate limiting: the client address, hashed so it is not stored raw. */
+    public static function clientKey(): string
+    {
+        return hash('sha256', (string)($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
     }
 }

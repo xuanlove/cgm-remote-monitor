@@ -32,6 +32,7 @@ return [
     'login.noAccount' => '还没有账号？',
     'login.register' => '注册',
     'login.invalid' => '用户名或密码错误',
+    'login.tooMany' => '尝试过于频繁，请 15 分钟后再试',
 
     // ------------------------------------------------------------- register
     'register.title' => '注册',
@@ -45,6 +46,7 @@ return [
     'register.passwordLabel' => '密码（至少 8 位）',
     'register.submit' => '注册并开通',
     'register.hint' => '注册后系统会在 Nightscout 中自动为你创建以用户名命名的 Profile 档案与受限 API token。',
+    'register.tooMany' => '注册过于频繁，请 1 小时后再试',
 
     // ------------------------------------------------------------ dashboard
     'dash.title' => '血糖趋势',
@@ -290,6 +292,10 @@ return [
     'alert.lowTitle' => '血糖偏低提醒',
     'alert.highTitle' => '血糖偏高提醒',
     'alert.body' => ':value mmol/L（提醒线 :limit mmol/L）',
+    'alert.err.number' => '提醒阈值必须是数字',
+    'alert.err.lowRange' => '低值提醒需在 :min ~ :max mmol/L 之间',
+    'alert.err.highRange' => '高值提醒需在 :min ~ :max mmol/L 之间',
+    'alert.err.order' => '低值提醒必须小于高值提醒',
 
     // ------------------------------------------------------ table headers
     'col.time' => '时间',

@@ -20,11 +20,13 @@ use NightPanel\Db;
 $opts = getopt('', ['days::', 'treatments-days::', 'logs-days::', 'alerts-days::', 'vacuum', 'help']);
 
 if (isset($opts['help'])) {
-    fwrite(STDOUT, "Usage: php bin/cleanup.php [--days=90] [--treatments-days=365] [--logs-days=7] [--alerts-days=30] [--vacuum]\n");
+    fwrite(STDOUT, "Usage: php bin/cleanup.php [--days=120] [--treatments-days=365] [--logs-days=7] [--alerts-days=30] [--vacuum]\n");
     exit(0);
 }
 
-$entryDays = isset($opts['days']) ? max(1, (int)$opts['days']) : 90;
+// Reports cover up to 90 days; keeping 120 leaves room for the sync overlap
+// window without pruning data a 90-day report still needs.
+$entryDays = isset($opts['days']) ? max(1, (int)$opts['days']) : 120;
 $treatmentDays = isset($opts['treatments-days']) ? max(1, (int)$opts['treatments-days']) : 365;
 $logDays = isset($opts['logs-days']) ? max(1, (int)$opts['logs-days']) : 7;
 $alertDays = isset($opts['alerts-days']) ? max(1, (int)$opts['alerts-days']) : 30;

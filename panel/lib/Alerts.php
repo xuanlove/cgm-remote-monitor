@@ -50,16 +50,16 @@ final class Alerts
         $high = filter_var($input['high'] ?? null, FILTER_VALIDATE_FLOAT);
 
         if ($low === false || $high === false) {
-            return [self::load($userId), '提醒阈值必须是数字'];
+            return [self::load($userId), Lang::t('alert.err.number')];
         }
         if ($low < self::MIN_LOW || $low > self::MAX_LOW) {
-            return [self::load($userId), '低值提醒需在 ' . self::MIN_LOW . ' ~ ' . self::MAX_LOW . ' mmol/L 之间'];
+            return [self::load($userId), Lang::t('alert.err.lowRange', ['min' => self::MIN_LOW, 'max' => self::MAX_LOW])];
         }
         if ($high < self::MIN_HIGH || $high > self::MAX_HIGH) {
-            return [self::load($userId), '高值提醒需在 ' . self::MIN_HIGH . ' ~ ' . self::MAX_HIGH . ' mmol/L 之间'];
+            return [self::load($userId), Lang::t('alert.err.highRange', ['min' => self::MIN_HIGH, 'max' => self::MAX_HIGH])];
         }
         if ($low >= $high) {
-            return [self::load($userId), '低值提醒必须小于高值提醒'];
+            return [self::load($userId), Lang::t('alert.err.order')];
         }
 
         $settings = [

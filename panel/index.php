@@ -25,6 +25,19 @@ use NightPanel\NsException;
 use NightPanel\Sync;
 use NightPanel\TreatmentTypes;
 
+/* ------------------------------------------------------- security headers */
+// Every asset the panel uses is same-origin, so a restrictive policy is free;
+// templates rely on inline <script>/<style>, which the policy allows.
+header('X-Content-Type-Options: nosniff');
+header('X-Frame-Options: DENY');
+header('Referrer-Policy: same-origin');
+header(
+    "Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; "
+    . "style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; "
+    . "font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; "
+    . "frame-ancestors 'none'"
+);
+
 Auth::boot();
 Lang::init();
 Auth::bootstrapAdmin();
@@ -194,6 +207,28 @@ function profile_record(): ?array
     return nsClient()->currentProfileRecord();
 }
 
+/**
+ * Live profile records for write paths.
+ *
+ * A mirrored snapshot lags behind Nightscout. Saving with a stale `_id` answers
+ * 404, and activating a plan from a stale list rebuilds the record from an
+ * outdated store, dropping entries that were written after the last sync. All
+ * mutations therefore read the current document straight from Nightscout;
+ * read-only pages stay mirror-first.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function profile_records_live(): array
+{
+    return nsClient()->profiles();
+}
+
+/** The live current profile record, for write paths. */
+function profile_record_live(): ?array
+{
+    return nsClient()->currentProfileRecord();
+}
+
 /** One treatment for ownership checks, mirror first with a live fallback. */
 function find_treatment(array $user, string $id): ?array
 {
@@ -209,18 +244,18 @@ function find_treatment(array $user, string $id): ?array
 }
 
 /**
- * Best-effort refresh after a write, so the mirrored view is consistent right
- * away. Failures are ignored: the scheduled run is the safety net.
+ * Nightscout's write endpoints answer with either one record or a one-item
+ * array; normalise to a single document.
  *
- * @param array<int,string> $streams
+ * @param array<int|string,mixed> $body
+ * @return array<string,mixed>|null
  */
-function sync_now(array $user, array $streams = ['entries', 'treatments']): void
+function created_record(array $body): ?array
 {
-    try {
-        (new Sync(nsClient()))->user($user, $streams, false, 2);
-    } catch (\Throwable $e) {
-        // ignore: cron will catch up
+    if (isset($body[0]) && is_array($body[0])) {
+        return $body[0];
     }
+    return $body === [] ? null : $body;
 }
 
 /** Refresh the shared profile snapshot after a profile write. */
@@ -339,6 +374,11 @@ try {
 
         case $path === '/login' && $method === 'POST':
             Auth::assertCsrf($_POST['csrf'] ?? null);
+            // Throttle per client address: 20 attempts per 15 minutes.
+            if (!Db::rateLimit('login', Db::clientKey(), 20, 900)) {
+                view('login', ['error' => Lang::t('login.tooMany')]);
+                break;
+            }
             $user = findUser(trim((string)($_POST['username'] ?? '')));
             if ($user === null || !password_verify((string)($_POST['password'] ?? ''), $user['password_hash'])) {
                 view('login', ['error' => Lang::t('login.invalid')]);
@@ -358,8 +398,14 @@ try {
             Lang::set((string)($_POST['lang'] ?? ''));
             // Back to the page the switcher was used on, defaulting to the
             // dashboard for a fresh (or forged) request.
+            // Only a local path is accepted: `//evil.example` is a
+            // protocol-relative URL and would leave the panel.
             $back = (string)($_POST['back'] ?? '');
-            $target = preg_match('#^/[a-z0-9/?=_.&-]*$#i', $back) === 1 ? $back : '/dashboard';
+            $target = str_starts_with($back, '/')
+                && !str_starts_with($back, '//')
+                && preg_match('#^/[a-z0-9/?=_.&-]*$#i', $back) === 1
+                ? $back
+                : '/dashboard';
             header('Location: ' . $target);
             exit;
 
@@ -369,6 +415,11 @@ try {
 
         case $path === '/register' && $method === 'POST':
             Auth::assertCsrf($_POST['csrf'] ?? null);
+            // Throttle per client address: 10 registrations per hour.
+            if (!Db::rateLimit('register', Db::clientKey(), 10, 3600)) {
+                view('register', ['error' => Lang::t('register.tooMany'), 'success' => null, 'info' => null]);
+                break;
+            }
             $username = strtolower(trim((string)($_POST['username'] ?? '')));
             $password = (string)($_POST['password'] ?? '');
             $error = null;
@@ -397,13 +448,25 @@ try {
                 'INSERT INTO panel_users (username, password_hash, role, ns_subject_id, ns_role_name, ns_access_token_enc)
                  VALUES (?, ?, "user", ?, ?, ?)'
             );
-            $stmt->execute([
-                $username,
-                password_hash($password, PASSWORD_DEFAULT),
-                $provisioned['subjectId'],
-                $provisioned['roleName'],
-                Db::encrypt($provisioned['token']),
-            ]);
+            try {
+                $stmt->execute([
+                    $username,
+                    password_hash($password, PASSWORD_DEFAULT),
+                    $provisioned['subjectId'],
+                    $provisioned['roleName'],
+                    Db::encrypt($provisioned['token']),
+                ]);
+            } catch (\PDOException $e) {
+                // Two registrations can pass findUser() at once; the unique
+                // index picks a winner. Undo the loser's Nightscout subject.
+                try {
+                    nsClient()->deleteSubject((string)$provisioned['subjectId']);
+                } catch (NsException $ignored) {
+                    // already gone, or Nightscout unreachable: nothing to undo
+                }
+                view('register', ['error' => Lang::t('val.usernameTaken'), 'success' => null, 'info' => null]);
+                break;
+            }
 
             view('register', [
                 'error' => null,
@@ -512,7 +575,9 @@ try {
             $user = Auth::requireUser();
             Auth::assertCsrf($_POST['csrf'] ?? null);
             try {
-                $record = profile_record();
+                // Live read: the PUT must target the record Nightscout has now,
+                // not the one the last sync happened to store.
+                $record = profile_record_live();
                 if ($record === null || !isset($record['store'][$user['username']])) {
                     throw new NsException('Profile record missing');
                 }
@@ -591,7 +656,11 @@ try {
                     case 'glucose':
                         $sgv = (float)($_POST['sgv'] ?? 0);
                         if ($sgv < 10 || $sgv > 600) { throw new \InvalidArgumentException(Lang::t('val.glucoseRange')); }
-                        $client->createEntry($user['username'], $sgv, ($_POST['timestamp'] ?? '') ?: null);
+                        $created = $client->createEntry($user['username'], $sgv, ($_POST['timestamp'] ?? '') ?: null);
+                        $entry = created_record($created);
+                        if ($entry !== null) {
+                            Mirror::storeEntry((int)$user['id'], $entry, (string)$user['username']);
+                        }
                         break;
                     case 'treatment':
                         // Every event type goes through the registry, so only the
@@ -601,21 +670,24 @@ try {
                             throw new \InvalidArgumentException(Lang::t('val.unsupportedEvent'));
                         }
                         $record = TreatmentTypes::build($eventType, $_POST);
-                        $client->createTreatment($record, $user['username']);
+                        $created = created_record($client->createTreatment($record, $user['username']));
+                        if ($created !== null) {
+                            Mirror::storeTreatment((int)$user['id'], $created);
+                        }
                         break;
                     case 'activity':
-                        $client->createActivity([
+                        $created = created_record($client->createActivity([
                             'eventType' => trim((string)($_POST['activityType'] ?? 'Exercise')),
                             'duration' => (($_POST['duration'] ?? '') !== '') ? (int)$_POST['duration'] : null,
                             'notes' => trim((string)($_POST['notes'] ?? '')),
-                        ], $user['username']);
+                        ], $user['username']));
+                        if ($created !== null) {
+                            Mirror::storeTreatment((int)$user['id'], $created);
+                        }
                         break;
                     default:
                         throw new \InvalidArgumentException(Lang::t('val.unknownKind'));
                 }
-                // Pull the new record into the mirror before rendering, so the
-                // next page load already shows it.
-                sync_now($user, $kind === 'glucose' ? ['entries'] : ['treatments']);
                 view('entry', [
                     'user' => $user,
                     'types' => TreatmentTypes::types(),
@@ -691,7 +763,7 @@ try {
             try {
                 $eventType = (string)($_POST['eventType'] ?? $existing['eventType'] ?? 'Note');
                 if (!TreatmentTypes::has($eventType)) {
-                    throw new \InvalidArgumentException('不支持的事件类型');
+                    throw new \InvalidArgumentException(Lang::t('val.unsupportedEvent'));
                 }
                 $updated = TreatmentTypes::build($eventType, $_POST);
                 // Identity and attribution are carried from the stored record,
@@ -699,8 +771,8 @@ try {
                 $updated['_id'] = (string)$existing['_id'];
                 $updated['enteredBy'] = (string)$existing['enteredBy'];
                 $updated['created_at'] = (string)($existing['created_at'] ?? gmdate('c'));
-                $client->updateTreatment($updated);
-                sync_now($user, ['treatments']);
+                $saved = created_record($client->updateTreatment($updated)) ?? $updated;
+                Mirror::storeTreatment((int)$user['id'], $saved);
                 header('Location: /treatments');
                 exit;
             } catch (\InvalidArgumentException $e) {
@@ -733,7 +805,7 @@ try {
             $existing = $id !== '' ? find_treatment($user, $id) : null;
             if ($existing !== null && self_owned($existing, $user)) {
                 nsClient()->deleteTreatment($id);
-                sync_now($user, ['treatments']);
+                Mirror::forgetTreatment((int)$user['id'], $id);
             }
             header('Location: /treatments');
             exit;
@@ -756,7 +828,7 @@ try {
             $planId = (string)($_POST['_id'] ?? '');
             $error = null;
             try {
-                $records = profile_records();
+                $records = profile_records_live();
                 $source = null;
                 foreach ($records as $record) {
                     if ((string)$record['_id'] === $planId) { $source = $record; break; }
@@ -796,7 +868,7 @@ try {
             $planId = (string)($_POST['_id'] ?? '');
             $error = null;
             try {
-                $records = profile_records();
+                $records = profile_records_live();
                 $target = null;
                 $index = -1;
                 foreach ($records as $i => $record) {
@@ -834,7 +906,7 @@ try {
             $endMs = (int)round(microtime(true) * 1000);
             $startMs = $endMs - $days * 86400 * 1000;
 
-            $readings = fetch_readings($user, $startMs, $endMs);
+            $readings = Mirror::statsReadings((int)$user['id'], $startMs, $endMs);
 
             // The user's own profile target decides "目标范围"; the consensus
             // 3.9-10.0 band decides TIR/TAR/TBR.
@@ -951,8 +1023,28 @@ try {
                 if (!empty($victim['ns_subject_id'])) {
                     try { nsClient()->deleteSubject((string)$victim['ns_subject_id']); } catch (NsException $e) { /* keep going */ }
                 }
-                $del = Db::pdo()->prepare('DELETE FROM panel_users WHERE id = ?');
-                $del->execute([$id]);
+                // The mirror tables predate foreign keys, so remove their rows
+                // explicitly instead of leaving orphaned data behind.
+                $pdo = Db::pdo();
+                $pdo->beginTransaction();
+                try {
+                    foreach ([
+                        'panel_entries',
+                        'panel_treatments',
+                        'panel_devicestatus',
+                        'panel_sync_state',
+                        'panel_sync_log',
+                        'panel_alert_events',
+                        'panel_alerts',
+                    ] as $table) {
+                        $pdo->prepare('DELETE FROM ' . $table . ' WHERE user_id = ?')->execute([$id]);
+                    }
+                    $pdo->prepare('DELETE FROM panel_users WHERE id = ?')->execute([$id]);
+                    $pdo->commit();
+                } catch (\Throwable $e) {
+                    $pdo->rollBack();
+                    throw $e;
+                }
             }
             header('Location: /admin/users');
             exit;
@@ -960,8 +1052,16 @@ try {
         case $path === '/admin/settings' && $method === 'POST':
             Auth::assertCsrf($_POST['csrf'] ?? null);
             Auth::requireAdmin();
-            Db::setSetting('ns_url', rtrim(trim((string)($_POST['ns_url'] ?? '')), '/'));
-            Db::setSetting('ns_secret', trim((string)($_POST['ns_secret'] ?? '')));
+            // Empty means "keep the current value": the form is an override
+            // form, so a blank field must never wipe a working connection.
+            $url = rtrim(trim((string)($_POST['ns_url'] ?? '')), '/');
+            if ($url !== '') {
+                Db::setSetting('ns_url', $url);
+            }
+            $secret = trim((string)($_POST['ns_secret'] ?? ''));
+            if ($secret !== '') {
+                Db::setSecret('ns_secret', $secret);
+            }
             header('Location: /admin/users');
             exit;
 

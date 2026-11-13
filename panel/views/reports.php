@@ -98,7 +98,7 @@ $hasData = ($stats['count'] ?? 0) > 0;
 
 <script src="/vendor/echarts.min.js"></script>
 <script>
-const STATS = <?= json_encode($stats, JSON_UNESCAPED_UNICODE) ?>;
+const STATS = <?= js_json($stats) ?>;
 const I18N = <?= \NightPanel\Lang::js([
     'rep.share',
     'rep.percentage',
@@ -112,7 +112,7 @@ const I18N = <?= \NightPanel\Lang::js([
     'seg.above',
     'rep.lowEventsCount',
 ]) ?>;
-const LOCALE = <?= json_encode(\NightPanel\Lang::htmlLang()) ?>;
+const LOCALE = <?= js_json(\NightPanel\Lang::htmlLang()) ?>;
 
 function themeColors () {
   const light = document.documentElement.classList.contains('light');

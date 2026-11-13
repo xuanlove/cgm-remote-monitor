@@ -198,12 +198,6 @@ final class NsClient
         return $records[0] ?? null;
     }
 
-    /** Treatments entered by one user. */
-    public function treatmentsByUser(string $enteredBy, int $count = 100): array
-    {
-        return $this->treatmentQuery('&find[enteredBy]=' . rawurlencode($enteredBy), $count);
-    }
-
     /** Treatments of one user inside a millisecond range (for exports). */
     public function treatmentsBetween(string $enteredBy, int $startMs, int $endMs): array
     {

@@ -73,7 +73,7 @@
 </main>
 <script>
 window.PANEL_I18N = <?= \NightPanel\Lang::js(['theme.toLight', 'theme.toDark']) ?>;
-window.PANEL_LOCALE = <?= json_encode(\NightPanel\Lang::htmlLang()) ?>;
+window.PANEL_LOCALE = <?= js_json(\NightPanel\Lang::htmlLang()) ?>;
 (function () {
   var btn = document.getElementById('themeToggle');
   function paint() {
