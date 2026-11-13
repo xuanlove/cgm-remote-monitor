@@ -6,7 +6,9 @@ require __DIR__ . '/lib/Auth.php';
 require __DIR__ . '/lib/NsClient.php';
 require __DIR__ . '/lib/TreatmentTypes.php';
 require __DIR__ . '/lib/GlucoseStats.php';
+require __DIR__ . '/lib/Alerts.php';
 
+use NightPanel\Alerts;
 use NightPanel\Auth;
 use NightPanel\Db;
 use NightPanel\GlucoseStats;
@@ -332,12 +334,104 @@ try {
                 'mbg' => $mbg,
                 'devicestatus' => $status,
                 'profile' => $own,
+                'alerts' => Alerts::load((int)$user['id']),
             ]);
 
         case $path === '/data/treatments.json' && $method === 'GET':
             $user = Auth::requireUser();
             $treatments = nsClient()->treatmentsByUser($user['username'], 100);
             json_out(['treatments' => $treatments]);
+
+        /* ------------------------------------------- D1 实时推送（SSE） */
+
+        case $path === '/stream' && $method === 'GET':
+            $user = Auth::requireUser();
+
+            // The stream stays open, so the session lock has to be released
+            // first: otherwise this browser could not load any other panel page
+            // while the dashboard is listening.
+            session_write_close();
+            set_time_limit(0);
+
+            header('Content-Type: text/event-stream; charset=utf-8');
+            header('Cache-Control: no-cache, no-store');
+            header('X-Accel-Buffering: no');
+            while (ob_get_level() > 0) {
+                ob_end_flush();
+            }
+
+            $device = (string)$user['username'];
+            $deadline = time() + 110;
+            $lastTs = 0;
+            $first = true;
+
+            while (time() < $deadline && !connection_aborted()) {
+                try {
+                    $records = nsClient()->entriesByDevice($device, 1);
+                    $entry = $records[0] ?? null;
+                    if ($entry !== null) {
+                        $ts = (int)($entry['date'] ?? 0);
+                        // The first pass always sends the latest reading so the
+                        // page renders immediately after connecting.
+                        if ($ts > $lastTs || $first) {
+                            $lastTs = $ts;
+                            echo "event: reading\n";
+                            echo 'data: ' . json_encode([
+                                'ts' => $ts,
+                                'sgv' => (float)$entry['sgv'],
+                                'v' => round(((float)$entry['sgv']) / 18, 2),
+                                'direction' => $entry['direction'] ?? null,
+                                'delta' => $entry['delta'] ?? null,
+                            ], JSON_UNESCAPED_SLASHES) . "\n\n";
+                        } else {
+                            echo ": ping\n\n";
+                        }
+                    } else {
+                        echo ": ping\n\n";
+                    }
+                    @flush();
+                } catch (NsException $e) {
+                    echo "event: streamerror\n";
+                    echo 'data: ' . json_encode(['message' => $e->getMessage()], JSON_UNESCAPED_SLASHES) . "\n\n";
+                    @flush();
+                    break;
+                } catch (\Throwable $e) {
+                    break;
+                }
+                $first = false;
+                sleep(8);
+            }
+
+            // Leaving ends the response; EventSource reconnects on its own, so
+            // a long-lived stream never pins a worker for good.
+            echo "event: bye\n";
+            echo "data: {}\n\n";
+            @flush();
+            exit;
+
+        /* ------------------------------------------- D2 个人提醒线设置 */
+
+        case $path === '/settings/alerts' && $method === 'GET':
+            $user = Auth::requireUser();
+            view('alerts', [
+                'user' => $user,
+                'settings' => Alerts::load((int)$user['id']),
+                'error' => null,
+                'success' => null,
+            ]);
+            break;
+
+        case $path === '/settings/alerts' && $method === 'POST':
+            $user = Auth::requireUser();
+            Auth::assertCsrf($_POST['csrf'] ?? null);
+            [$settings, $error] = Alerts::save((int)$user['id'], $_POST);
+            view('alerts', [
+                'user' => $user,
+                'settings' => $settings,
+                'error' => $error,
+                'success' => $error === null ? '提醒设置已保存' : null,
+            ]);
+            break;
 
         case $path === '/profile' && $method === 'GET':
             $user = Auth::requireUser();

@@ -1,14 +1,18 @@
 <h1>血糖趋势 <span class="hint" style="font-size:13px;">· 归属：device = <?= htmlspecialchars($user['username']) ?> · 来自你的 Profile 档案</span></h1>
 
+<div id="alertBanner" style="display:none;padding:10px 16px;border-radius:10px;margin-bottom:16px;font-weight:600;"></div>
+
 <div class="card">
   <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
     <span style="font-size:26px;font-weight:600;" id="latestSgv">--</span>
     <span style="font-size:20px;" id="latestDir" title="趋势"></span>
     <span class="hint" id="latestDelta"></span>
     <span style="flex:1;"></span>
+    <span class="hint" id="liveState" title="实时连接状态">● 连接中</span>
     <span class="hint" id="chipIob" title="体内胰岛素活性">IOB -</span>
     <span class="hint" id="chipCob" title="活性碳水">COB -</span>
     <span class="hint" id="chipBattery" title="上传器电量">🔋 -</span>
+    <a href="/settings/alerts" class="hint">提醒设置</a>
   </div>
   <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
     <strong>时间窗：</strong>
@@ -93,6 +97,7 @@ async function loadAll() {
       fetch('/data/treatments.json').then(r => r.json())
     ]);
     glucose = g; treatments = t;
+    window.__glucosePayload = glucose;
     document.getElementById('chartMsg').style.display = 'none';
   } catch (e) {
     const msg = document.getElementById('chartMsg');
@@ -119,6 +124,7 @@ async function loadAll() {
     document.getElementById('latestSgv').style.color = statusOf(last.v, targetLowOf(glucose), targetHighOf(glucose)).color;
     document.getElementById('latestDir').textContent = DIR_ARROWS[last.dir] || '';
     document.getElementById('latestDelta').textContent = fmtDelta(deltaMmol) || '';
+    evaluateAlerts(last.v, glucose.alerts);
   } else {
     document.getElementById('latestSgv').textContent = '--';
     document.getElementById('latestDir').textContent = '';
@@ -306,12 +312,116 @@ function backToLive () {
   loadAll();
 }
 
+/* ============================================================
+ * D2 个人提醒线：越线横幅 + 浏览器通知（同一区间只提醒一次）
+ * ============================================================ */
+let alertState = null;   // null | 'low' | 'high'
+
+function evaluateAlerts (value, settings) {
+  const banner = document.getElementById('alertBanner');
+  if (!settings || !settings.enabled) {
+    banner.style.display = 'none';
+    alertState = null;
+    return;
+  }
+  const state = value < settings.low ? 'low' : (value > settings.high ? 'high' : null);
+  if (state === null) {
+    banner.style.display = 'none';
+    alertState = null;
+    return;
+  }
+
+  const isLow = state === 'low';
+  banner.style.display = 'block';
+  banner.style.background = isLow ? 'rgba(224,90,90,.16)' : 'rgba(224,160,90,.16)';
+  banner.style.color = isLow ? '#e05a5a' : '#e0a05a';
+  banner.style.border = '1px solid ' + (isLow ? 'rgba(224,90,90,.5)' : 'rgba(224,160,90,.5)');
+  banner.textContent = (isLow ? '⚠ 血糖偏低：' : '⚠ 血糖偏高：') + value.toFixed(1) + ' mmol/L'
+    + '（提醒线 ' + (isLow ? '< ' + settings.low : '> ' + settings.high) + '）';
+
+  // Only notify on a fresh crossing, not on every refresh inside the same zone.
+  if (alertState !== state) {
+    alertState = state;
+    maybeNotify(
+      isLow ? '血糖偏低提醒' : '血糖偏高提醒',
+      value.toFixed(1) + ' mmol/L（提醒线 ' + (isLow ? settings.low : settings.high) + ' mmol/L）',
+      settings
+    );
+  }
+}
+
+function maybeNotify (title, body, settings) {
+  if (!settings || !settings.browser) return;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  try {
+    new Notification(title, { body: body, tag: 'night-panel-alert' });
+  } catch (e) { /* notification failures must never break the page */ }
+}
+
+/* ============================================================
+ * D1 实时推送：SSE 有新读数时更新状态条并追加数据点
+ * ============================================================ */
+let lastStreamTs = 0;
+
+function setLiveState (text, color) {
+  const el = document.getElementById('liveState');
+  el.textContent = text;
+  el.style.color = color;
+}
+
+function applyStreamReading (payload) {
+  if (!payload || !payload.ts || payload.ts <= lastStreamTs) return;
+  lastStreamTs = payload.ts;
+
+  document.getElementById('latestSgv').textContent = payload.v.toFixed(1);
+  document.getElementById('latestDir').textContent = DIR_ARROWS[payload.direction] || '';
+  document.getElementById('latestDelta').textContent =
+    fmtDelta(payload.delta != null ? payload.delta / MGDL_TO_MMOL : null) || '';
+
+  const g = window.__glucosePayload;
+  if (g) evaluateAlerts(payload.v, g.alerts);
+
+  // A new point arrived: re-render the chart rather than patching it, so the
+  // smoothing toggle and the target band stay consistent.
+  if (!document.getElementById('historyDate').value) loadAll();
+}
+
+function connectStream () {
+  if (typeof EventSource === 'undefined') {
+    setLiveState('● 轮询模式', '#8b95a9');
+    return;
+  }
+  const source = new EventSource('/stream');
+
+  source.addEventListener('open', () => setLiveState('● 实时', '#3fb27f'));
+  source.addEventListener('reading', ev => {
+    try { applyStreamReading(JSON.parse(ev.data)); } catch (e) { }
+  });
+  source.addEventListener('streamerror', () => {
+    setLiveState('● 数据源异常', '#e05a5a');
+  });
+  source.addEventListener('bye', () => {
+    // The server closes the stream after ~2 minutes; reconnect deliberately so
+    // the interval is explicit instead of relying on the browser's backoff.
+    source.close();
+    setLiveState('● 重连中', '#e0a05a');
+    setTimeout(connectStream, 1500);
+  });
+  source.addEventListener('error', () => {
+    setLiveState('● 重连中', '#e0a05a');
+  });
+}
+
 window.addEventListener('resize', () => chart && chart.resize());
 
 /* 跟随日间/夜间切换重建图表配色；历史日回看模式暂停自动刷新 */
 new MutationObserver(() => loadAll())
   .observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 
-setInterval(() => { if (!document.getElementById('historyDate').value) loadAll(); }, 60 * 1000);
+/* Slow safety net: the stream carries new readings, this only refreshes the
+ * treatments table and the profile-derived band. */
+setInterval(() => { if (!document.getElementById('historyDate').value) loadAll(); }, 5 * 60 * 1000);
+
 loadAll();
+connectStream();
 </script>

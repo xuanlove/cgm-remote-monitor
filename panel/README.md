@@ -30,8 +30,11 @@ PANEL_ADMIN_USER=admin PANEL_ADMIN_PASS=<初始密码> \
 PANEL_SECRET_KEY=<32位随机串> \
 NIGHTSCOUT_URL=http://127.0.0.1:1337 \
 NIGHTSCOUT_ADMIN_SECRET=<与上面相同的API_SECRET> \
+PHP_CLI_SERVER_WORKERS=4 \
 php -S 0.0.0.0:8090 router.php
 ```
+
+`PHP_CLI_SERVER_WORKERS` 让内置服务器多进程处理请求：仪表盘的实时推送（SSE）会占用一个连接约 2 分钟，单进程的 `php -S` 在流打开期间无法响应其他请求，因此本地运行至少给 2 个 worker。生产环境请用 php-fpm + nginx，SSE 需关闭代理缓冲（代码已发送 `X-Accel-Buffering: no`）。
 
 首次访问会自动创建 SQLite（`panel/data/panel.db`）与初始 admin（凭据打印在日志中）。
 
@@ -47,8 +50,9 @@ php -S 0.0.0.0:8090 router.php
 ## 功能页
 
 - `/register` 注册 → 自动创建 `store[<username>]` + 专属角色（`api:profile:<username>:read/write/create` + 各集合 create）+ subject，页面上直接展示发放的地址与 token
-- `/dashboard` 血糖趋势（ECharts，mmol/L）：趋势箭头 + Δ 变化 + IOB/COB/电量、校准血糖（mbg）叠加、任意历史日回看、3 点平滑
+- `/dashboard` 血糖趋势（ECharts，mmol/L）：趋势箭头 + Δ 变化 + IOB/COB/电量、校准血糖（mbg）叠加、任意历史日回看、3 点平滑；新读数经 SSE 实时推送，越线时显示告警横幅
 - `/reports` 统计报告（近 7/14/30/90 天）：TIR/TAR/TBR、血糖分布（5 档）、平均值/中位数/标准差/CV、GMI、低血糖事件（≥15 分钟）、数据覆盖率，以及落在本人 Profile 目标范围的占比
+- `/settings/alerts` 个人提醒线：低/高阈值（存面板数据库，不写入 Nightscout），可同时开启浏览器桌面通知
 - `/profile` 编辑当前方案的配置档（基础率/敏感系数/目标范围/DIA/碳水速率）——以用户 token 直连提交，Nightscout 服务端强制作用域
 - `/profile/plans` 治疗方案版本：按 startDate 倒序列出，当前生效 / 历史；「启用此方案」以该版本内容写入一条新记录；「保存为新版本」快照当前方案；共用记录与他人档案不可删除
 - `/entry` 填写数据：手填血糖 + 全部治疗事件类型（大剂量/碳水/监测/临时/护理共 20 种，表单字段由服务端注册表驱动）+ 活动记录
@@ -68,8 +72,9 @@ Nightscout 权限改造的单元测试：`tests/profile-scoped.test.js`
 npx env-cmd -f ./tests/ci.test.env npx mocha --timeout 30000 --require ./tests/hooks.js --exit ./tests/profile-scoped.test.js
 ```
 
-面板统计逻辑的自检（无需任何依赖）：
+面板统计与提醒逻辑的自检（无需任何依赖）：
 
 ```bash
 php panel/tests/glucose-stats-test.php
+php panel/tests/alerts-test.php
 ```

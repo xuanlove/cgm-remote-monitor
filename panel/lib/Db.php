@@ -47,6 +47,17 @@ final class Db
                 value TEXT
             )'
         );
+        self::$pdo->exec(
+            'CREATE TABLE IF NOT EXISTS panel_alerts (
+                user_id INTEGER PRIMARY KEY,
+                low_mmol REAL NOT NULL,
+                high_mmol REAL NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 0,
+                browser INTEGER NOT NULL DEFAULT 0,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES panel_users(id) ON DELETE CASCADE
+            )'
+        );
     }
 
     /** Encrypt a secret for storage; the key comes from the environment. */
