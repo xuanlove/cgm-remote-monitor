@@ -156,6 +156,31 @@ final class NsClient
         return is_array($body) ? $body : [];
     }
 
+    /**
+     * Entries of one type for a device within a millisecond-epoch range.
+     * The range query lifts the default 288-record cap so historical days
+     * come back whole.
+     */
+    public function entriesInRange(string $device, string $type, int $startMs, int $endMs, int $count = 1500): array
+    {
+        $path = '/api/v1/entries.json?count=' . $count
+            . '&find[device]=' . rawurlencode($device)
+            . '&find[type]=' . rawurlencode($type)
+            . '&find[date][$gte]=' . $startMs
+            . '&find[date][$lt]=' . $endMs;
+        $body = $this->requestOrThrow('GET', $path);
+        return is_array($body) ? $body : [];
+    }
+
+    /** Latest device status record attributed to one device (iob/cob/battery). */
+    public function latestDeviceStatus(string $device): ?array
+    {
+        $path = '/api/v1/devicestatus.json?count=1&find[device]=' . rawurlencode($device);
+        $body = $this->requestOrThrow('GET', $path);
+        $records = is_array($body) ? $body : [];
+        return $records[0] ?? null;
+    }
+
     /** Treatments entered by one user. */
     public function treatmentsByUser(string $enteredBy, int $count = 100): array
     {

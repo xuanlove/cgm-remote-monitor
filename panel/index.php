@@ -251,11 +251,28 @@ try {
             $user = Auth::requireUser();
             // Attribution is taken from the session, never from the request.
             $device = $user['username'];
-            $entries = nsClient()->entriesByDevice($device, 288);
-            $profileRecord = nsClient()->currentProfileRecord();
+            $client = nsClient();
+
+            // A ?date=YYYY-MM-DD parameter rewinds to a whole historical day;
+            // without it the default window is "today" (the client narrows it
+            // to its selected hour span).
+            if (!empty($_GET['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$_GET['date'])) {
+                $startMs = strtotime($_GET['date'] . ' 00:00:00') * 1000;
+                $endMs = strtotime($_GET['date'] . ' 23:59:59') * 1000 + 60000;
+            } else {
+                $endMs = (int)round(microtime(true) * 1000);
+                $startMs = $endMs - 30 * 3600 * 1000;
+            }
+
+            $entries = $client->entriesInRange($device, 'sgv', $startMs, $endMs, 1500);
+            $mbg = $client->entriesInRange($device, 'mbg', $startMs, $endMs, 100);
+            $profileRecord = $client->currentProfileRecord();
             $own = $profileRecord['store'][$user['username']] ?? null;
+            $status = $client->latestDeviceStatus($device);
             json_out([
                 'entries' => $entries,
+                'mbg' => $mbg,
+                'devicestatus' => $status,
                 'profile' => $own,
             ]);
 

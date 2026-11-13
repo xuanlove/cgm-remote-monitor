@@ -1,6 +1,15 @@
 <h1>血糖趋势 <span class="hint" style="font-size:13px;">· 归属：device = <?= htmlspecialchars($user['username']) ?> · 来自你的 Profile 档案</span></h1>
 
 <div class="card">
+  <div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;flex-wrap:wrap;">
+    <span style="font-size:26px;font-weight:600;" id="latestSgv">--</span>
+    <span style="font-size:20px;" id="latestDir" title="趋势"></span>
+    <span class="hint" id="latestDelta"></span>
+    <span style="flex:1;"></span>
+    <span class="hint" id="chipIob" title="体内胰岛素活性">IOB -</span>
+    <span class="hint" id="chipCob" title="活性碳水">COB -</span>
+    <span class="hint" id="chipBattery" title="上传器电量">🔋 -</span>
+  </div>
   <div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap;">
     <strong>时间窗：</strong>
     <select id="hours" onchange="loadAll()">
@@ -9,11 +18,15 @@
       <option value="12">最近 12 小时</option>
       <option value="24">最近 24 小时</option>
     </select>
+    <strong>日期回看：</strong>
+    <input type="date" id="historyDate" onchange="loadAll()" style="width:auto;">
+    <button type="button" id="backToLive" style="margin:0;padding:4px 12px;display:none;" onclick="backToLive()">回到实时</button>
+    <label style="display:inline-flex;align-items:center;gap:4px;margin:0;"><input type="checkbox" id="smooth" onchange="loadAll()" style="width:auto;"> 3 点平滑</label>
     <span id="updated" class="hint"></span>
     <span id="chartMsg" class="msg-bad" style="display:none;"></span>
   </div>
   <div id="chart" style="width:100%;height:420px;"></div>
-  <p class="hint">参考线：3.9 / 6.1 mmol/L（空腹默认）；若你在「我的 Profile」中设置了目标范围，则以你自己的档案为准。拖动缩放或使用下方滑块查看细节。</p>
+  <p class="hint">参考线：3.9 / 6.1 mmol/L（空腹默认）；若你在「我的 Profile」中设置了目标范围，则以你自己的档案为准。空心方块为校准血糖（mbg）。选择日期回看历史，勾选平滑可降噪。</p>
 </div>
 
 <div class="card">
@@ -29,12 +42,18 @@
 /* mg/dL → mmol/L */
 const MGDL_TO_MMOL = 18;
 
-/* 主题自适应配色：跟随导航栏的日间/夜间切换 */
+/* Nightscout direction → 趋势箭头 */
+const DIR_ARROWS = {
+  DoubleUp: '↑↑', SingleUp: '↑', FortyFiveUp: '↗', Flat: '→',
+  FortyFiveDown: '↘', SingleDown: '↓', DoubleDown: '↓↓',
+  'NOT COMPUTABLE': '⇄', 'RATE OUT OF RANGE': '⇄', error: '?'
+};
+
 function themeColors() {
   const light = document.documentElement.classList.contains('light');
   return light
-    ? { fg: '#1c2430', muted: '#5f6b7e', line: '#d8dee9', accent: '#2f6fe0', band: 'rgba(34,136,94,.12)', card: '#ffffff' }
-    : { fg: '#e6ebf4', muted: '#8b95a9', line: '#313a4d', accent: '#4f8ef7', band: 'rgba(63,178,127,.12)', card: '#232a38' };
+    ? { fg: '#1c2430', muted: '#5f6b7e', line: '#d8dee9', accent: '#2f6fe0', band: 'rgba(34,136,94,.12)', card: '#ffffff', mbg: '#5f6b7e' }
+    : { fg: '#e6ebf4', muted: '#8b95a9', line: '#313a4d', accent: '#4f8ef7', band: 'rgba(63,178,127,.12)', card: '#232a38', mbg: '#8b95a9' };
 }
 
 function statusOf (v, low, high) {
@@ -44,14 +63,33 @@ function statusOf (v, low, high) {
   return        { label: '正常', color: '#3fb27f' };
 }
 
+function fmtDelta (deltaMmol) {
+  if (deltaMmol === null || isNaN(deltaMmol)) return null;
+  return (deltaMmol >= 0 ? '▲ +' : '▼ ') + deltaMmol.toFixed(1) + ' mmol/L';
+}
+
+function smoothSeries (points) {
+  /* Nightscout 式 3 点均值降噪 */
+  return points.map((p, i) => {
+    if (i === 0 || i === points.length - 1) return { ...p, v: p.v };
+    const a = points[i - 1].v, b = p.v, c = points[i + 1].v;
+    return { ...p, v: +( (a + b + c) / 3 ).toFixed(2) };
+  });
+}
+
 let chart = null;
 
 async function loadAll() {
   const hours = document.getElementById('hours').value;
+  const dateVal = document.getElementById('historyDate').value;
+  const smooth = document.getElementById('smooth').checked;
+  document.getElementById('backToLive').style.display = dateVal ? 'inline-block' : 'none';
+
+  const url = dateVal ? '/data/glucose.json?date=' + dateVal : '/data/glucose.json';
   let glucose, treatments;
   try {
     const [g, t] = await Promise.all([
-      fetch('/data/glucose.json').then(r => r.json()),
+      fetch(url).then(r => r.json()),
       fetch('/data/treatments.json').then(r => r.json())
     ]);
     glucose = g; treatments = t;
@@ -63,22 +101,53 @@ async function loadAll() {
     return;
   }
 
-  const cutoff = Date.now() - hours * 3600 * 1000;
-  /* entries: sgv 为 mg/dL → 换算 mmol/L，时间点取 mills/date */
+  /* 实时模式按时间窗过滤；历史日模式整天展示 */
+  const cutoff = dateVal ? 0 : Date.now() - hours * 3600 * 1000;
   const entries = (glucose.entries || [])
-    .map(e => ({ ts: e.mills || (e.date ? +e.date : Date.parse(e.dateString)), v: +(e.sgv / MGDL_TO_MMOL).toFixed(2) }))
+    .map(e => ({ ts: e.mills || (e.date ? +e.date : Date.parse(e.dateString)), v: +(e.sgv / MGDL_TO_MMOL).toFixed(2), dir: e.direction || null, d: e.delta }))
     .filter(p => p.ts && p.ts >= cutoff)
     .sort((a, b) => a.ts - b.ts);
 
-  /* 目标范围：来自登录用户自己的 profile 文档（mg/dL → mmol/L），缺省 3.9/6.1 */
-  const prof = glucose.profile || {};
-  const lastPair = arr => (arr && arr.length) ? arr[arr.length - 1][1] / MGDL_TO_MMOL : null;
-  const targetLow  = lastPair(prof.target_low)  || 3.9;
-  const targetHigh = lastPair(prof.target_high) || 6.1;
+  const shown = smooth && entries.length > 2 ? smoothSeries(entries) : entries;
 
-  buildChart(entries, targetLow, targetHigh);
+  /* 状态条：最新值 + 趋势箭头 + delta（entry 缺 delta 时用相邻差值兜底） */
+  if (entries.length > 0) {
+    const last = entries[entries.length - 1];
+    const prev = entries.length > 1 ? entries[entries.length - 2] : null;
+    const deltaMmol = last.d != null ? last.d / MGDL_TO_MMOL : (prev ? +(last.v - prev.v).toFixed(2) : null);
+    document.getElementById('latestSgv').textContent = last.v.toFixed(1);
+    document.getElementById('latestSgv').style.color = statusOf(last.v, targetLowOf(glucose), targetHighOf(glucose)).color;
+    document.getElementById('latestDir').textContent = DIR_ARROWS[last.dir] || '';
+    document.getElementById('latestDelta').textContent = fmtDelta(deltaMmol) || '';
+  } else {
+    document.getElementById('latestSgv').textContent = '--';
+    document.getElementById('latestDir').textContent = '';
+    document.getElementById('latestDelta').textContent = '';
+  }
+
+  /* 设备状态 chips：IOB / COB / 上传器电量（缺字段显示 -） */
+  const ds = glucose.devicestatus || {};
+  const iob = ds.iob && ds.iob.iob != null ? ds.iob.iob + ' U' : '-';
+  const cob = ds.cob && ds.cob.cob != null ? ds.cob.cob + ' g' : '-';
+  const battery = (ds.uploader && ds.uploader.battery != null) ? ds.uploader.battery + '%' : '-';
+  document.getElementById('chipIob').textContent = 'IOB ' + iob;
+  document.getElementById('chipCob').textContent = 'COB ' + cob;
+  document.getElementById('chipBattery').textContent = '🔋 ' + battery;
+
+  /* 目标范围：来自登录用户自己的 profile 文档（mg/dL → mmol/L），缺省 3.9/6.1 */
+  const targetLow  = targetLowOf(glucose);
+  const targetHigh = targetHighOf(glucose);
+
+  /* 校准血糖 mbg：空心方块叠加 */
+  const mbgPoints = (glucose.mbg || [])
+    .map(e => ({ ts: e.mills || (e.date ? +e.date : Date.parse(e.dateString)), v: +(e.mbg / MGDL_TO_MMOL).toFixed(2) }))
+    .filter(p => p.ts && p.ts >= cutoff)
+    .sort((a, b) => a.ts - b.ts)
+    .map(p => [p.ts, p.v]);
+
+  buildChart(shown, mbgPoints, targetLow, targetHigh);
   document.getElementById('updated').textContent =
-    '更新于 ' + new Date().toLocaleTimeString('zh-CN') + '（' + entries.length + ' 条）';
+    '更新于 ' + new Date().toLocaleTimeString('zh-CN') + '（' + shown.length + ' 条' + (dateVal ? ' · ' + dateVal : '') + '）';
 
   const tbody = document.querySelector('#treatments tbody');
   tbody.innerHTML = '';
@@ -94,11 +163,20 @@ async function loadAll() {
   });
 }
 
-function buildChart(entries, targetLow, targetHigh) {
+function targetLowOf (glucose) {
+  const arr = glucose.profile && glucose.profile.target_low;
+  return (arr && arr.length) ? arr[arr.length - 1][1] / MGDL_TO_MMOL : 3.9;
+}
+function targetHighOf (glucose) {
+  const arr = glucose.profile && glucose.profile.target_high;
+  return (arr && arr.length) ? arr[arr.length - 1][1] / MGDL_TO_MMOL : 6.1;
+}
+
+function buildChart(entries, mbgPoints, targetLow, targetHigh) {
   const c = themeColors();
   const el = document.getElementById('chart');
 
-  if (entries.length === 0) {
+  if (entries.length === 0 && mbgPoints.length === 0) {
     if (chart) { chart.dispose(); chart = null; }
     el.innerHTML = '<p class="hint" style="padding:40px;text-align:center;">暂无血糖数据 —— 在「填写数据」提交血糖，或将 CGM 上传器的设备名设为你的用户名。</p>';
     return;
@@ -106,47 +184,20 @@ function buildChart(entries, targetLow, targetHigh) {
   if (!chart) chart = echarts.init(el);
   el.innerHTML = '';
 
-  const maxValue = Math.max(...entries.map(p => p.v), targetHigh);
+  const maxValue = Math.max(
+    ...entries.map(p => p.v), ...mbgPoints.map(p => p[1]), targetHigh
+  );
 
-  chart.setOption({
-    backgroundColor: 'transparent',
-    textStyle: { color: c.muted },
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: { type: 'line', lineStyle: { color: c.muted, type: 'dashed' } },
-      formatter: params => {
-        const p = params[0];
-        const v = p.value[1];
-        const st = statusOf(v, targetLow, targetHigh);
-        return '<b>' + new Date(p.value[0]).toLocaleString('zh-CN') + '</b><br/>血糖：<b style="color:' + st.color + '">'
-          + v.toFixed(1) + ' mmol/L</b>（' + st.label + '）';
-      }
-    },
-    legend: { top: 6, data: ['血糖值'], textStyle: { color: c.fg } },
-    grid: { left: 52, right: 20, top: 46, bottom: 70, containLabel: false },
-    xAxis: {
-      type: 'time',
-      name: '时间',
-      nameTextStyle: { color: c.muted },
-      axisLine: { lineStyle: { color: c.line } },
-      axisTick: { show: false },
-      axisLabel: { color: c.muted, hideOverlap: true }
-    },
-    yAxis: {
-      type: 'value',
-      name: 'mmol/L',
-      nameTextStyle: { color: c.muted },
-      min: 0,
-      max: Math.ceil((maxValue + 2) / 3) * 3,
-      axisLine: { show: false },
-      axisLabel: { color: c.muted },
-      splitLine: { lineStyle: { color: c.line, opacity: .45 } }
-    },
-    dataZoom: [
-      { type: 'inside', start: 0, end: 100 },
-      { type: 'slider', height: 20, bottom: 10, borderColor: c.line }
-    ],
-    series: [{
+  const deltaFormatter = idx => {
+    const e = entries[idx];
+    if (!e) return '';
+    const deltaMmol = e.d != null ? e.d / MGDL_TO_MMOL : (idx > 0 ? e.v - entries[idx - 1].v : null);
+    const d = fmtDelta(deltaMmol);
+    return d ? '<br/>' + d : '';
+  };
+
+  const series = [
+    {
       name: '血糖值',
       type: 'line',
       data: entries.map(p => [p.ts, p.v]),
@@ -181,7 +232,66 @@ function buildChart(entries, targetLow, targetHigh) {
           { yAxis: targetHigh, name: targetHigh.toFixed(1), lineStyle: { color: '#e0a05a' }, label: { color: '#e0a05a', position: 'insideStartBottom' } }
         ]
       }
-    }]
+    }
+  ];
+
+  if (mbgPoints.length > 0) {
+    series.push({
+      name: '校准血糖',
+      type: 'scatter',
+      data: mbgPoints,
+      symbol: 'rect',
+      symbolSize: 10,
+      itemStyle: { color: 'transparent', borderColor: c.mbg, borderWidth: 2 },
+      emphasis: { scale: 1.4 }
+    });
+  }
+
+  chart.setOption({
+    backgroundColor: 'transparent',
+    textStyle: { color: c.muted },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'line', lineStyle: { color: c.muted, type: 'dashed' } },
+      formatter: params => {
+        const p = params[0];
+        const v = p.value[1];
+        const st = statusOf(v, targetLow, targetHigh);
+        const idx = p.dataIndex;
+        const dir = entries[idx] && entries[idx].dir ? ' ' + (DIR_ARROWS[entries[idx].dir] || '') : '';
+        return '<b>' + new Date(p.value[0]).toLocaleString('zh-CN') + '</b>' + dir
+          + '<br/>血糖：<b style="color:' + st.color + '">' + v.toFixed(1) + ' mmol/L</b>（' + st.label + '）'
+          + deltaFormatter(idx);
+      }
+    },
+    legend: {
+      top: 6, data: mbgPoints.length > 0 ? ['血糖值', '校准血糖'] : ['血糖值'],
+      textStyle: { color: c.fg }
+    },
+    grid: { left: 52, right: 20, top: 46, bottom: 70, containLabel: false },
+    xAxis: {
+      type: 'time',
+      name: '时间',
+      nameTextStyle: { color: c.muted },
+      axisLine: { lineStyle: { color: c.line } },
+      axisTick: { show: false },
+      axisLabel: { color: c.muted, hideOverlap: true }
+    },
+    yAxis: {
+      type: 'value',
+      name: 'mmol/L',
+      nameTextStyle: { color: c.muted },
+      min: 0,
+      max: Math.ceil((maxValue + 2) / 3) * 3,
+      axisLine: { show: false },
+      axisLabel: { color: c.muted },
+      splitLine: { lineStyle: { color: c.line, opacity: .45 } }
+    },
+    dataZoom: [
+      { type: 'inside', start: 0, end: 100 },
+      { type: 'slider', height: 20, bottom: 10, borderColor: c.line }
+    ],
+    series
   }, true);
 }
 
@@ -190,12 +300,17 @@ function hexToRgba (hex, alpha) {
   return 'rgba(' + (n >> 16 & 255) + ',' + (n >> 8 & 255) + ',' + (n & 255) + ',' + alpha + ')';
 }
 
+function backToLive () {
+  document.getElementById('historyDate').value = '';
+  loadAll();
+}
+
 window.addEventListener('resize', () => chart && chart.resize());
 
-/* 跟随日间/夜间切换重建图表配色 */
-new MutationObserver(() => { if (chart) loadAll(); })
+/* 跟随日间/夜间切换重建图表配色；历史日回看模式暂停自动刷新 */
+new MutationObserver(() => loadAll())
   .observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 
+setInterval(() => { if (!document.getElementById('historyDate').value) loadAll(); }, 60 * 1000);
 loadAll();
-setInterval(loadAll, 60 * 1000);
 </script>
