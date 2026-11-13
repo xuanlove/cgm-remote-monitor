@@ -5,9 +5,11 @@ require __DIR__ . '/lib/Db.php';
 require __DIR__ . '/lib/Auth.php';
 require __DIR__ . '/lib/NsClient.php';
 require __DIR__ . '/lib/TreatmentTypes.php';
+require __DIR__ . '/lib/GlucoseStats.php';
 
 use NightPanel\Auth;
 use NightPanel\Db;
+use NightPanel\GlucoseStats;
 use NightPanel\NsClient;
 use NightPanel\NsException;
 use NightPanel\TreatmentTypes;
@@ -165,6 +167,20 @@ function defaultProfileTemplate(): array
 function self_owned(array $record, array $user): bool
 {
     return isset($record['enteredBy']) && (string)$record['enteredBy'] === (string)$user['username'];
+}
+
+/**
+ * Latest value of a profile time-shifted array (stored in mg/dL) as mmol/L.
+ */
+function self_target(array $profile, string $field, float $fallback): float
+{
+    $pairs = $profile[$field] ?? null;
+    if (!is_array($pairs) || count($pairs) === 0) {
+        return $fallback;
+    }
+    $last = $pairs[count($pairs) - 1];
+    $value = is_array($last) ? (float)($last[1] ?? 0) : (float)$last;
+    return $value > 0 ? round($value / 18, 2) : $fallback;
 }
 
 /**
@@ -641,6 +657,45 @@ try {
             }
             if ($error === null) { header('Location: /profile/plans'); exit; }
             view('plans', ['user' => $user, 'plans' => collect_plans($user['username']), 'error' => $error, 'success' => null]);
+            break;
+
+        /* ------------------------------------------- C1 TIR / 血糖分布报告 */
+
+        case $path === '/reports' && $method === 'GET':
+            $user = Auth::requireUser();
+            $days = (int)($_GET['days'] ?? 14);
+            if ($days < 1) { $days = 1; }
+            if ($days > 90) { $days = 90; }
+
+            $endMs = (int)round(microtime(true) * 1000);
+            $startMs = $endMs - $days * 86400 * 1000;
+
+            $entries = nsClient()->entriesBetween($user['username'], $startMs, $endMs);
+            $readings = [];
+            foreach ($entries as $entry) {
+                $ts = isset($entry['date']) ? (int)$entry['date'] : (int)strtotime((string)($entry['dateString'] ?? ''));
+                if ($ts <= 0 || !isset($entry['sgv'])) { continue; }
+                $readings[] = ['ts' => $ts, 'v' => round(((float)$entry['sgv']) / 18, 2)];
+            }
+            usort($readings, static fn(array $a, array $b): int => $a['ts'] <=> $b['ts']);
+
+            // The user's own profile target decides "目标范围"; the consensus
+            // 3.9-10.0 band decides TIR/TAR/TBR.
+            $record = nsClient()->currentProfileRecord();
+            $own = $record['store'][$user['username']] ?? [];
+            $targetLow = self_target($own, 'target_low', 3.9);
+            $targetHigh = self_target($own, 'target_high', 10.0);
+
+            $stats = GlucoseStats::compute($readings, $targetLow, $targetHigh);
+
+            view('reports', [
+                'user' => $user,
+                'days' => $days,
+                'stats' => $stats,
+                'from' => date('Y-m-d H:i', (int)($startMs / 1000)),
+                'to' => date('Y-m-d H:i', (int)($endMs / 1000)),
+                'error' => null,
+            ]);
             break;
 
         case $path === '/myapi' && $method === 'GET':

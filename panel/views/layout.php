@@ -46,6 +46,7 @@
   <button type="button" class="theme-toggle" id="themeToggle" title="切换日间/夜间模式"></button>
   <?php if ($user !== null): ?>
     <a href="/dashboard">仪表盘</a>
+    <a href="/reports">统计报告</a>
     <a href="/profile">我的 Profile</a>
     <a href="/profile/plans">治疗方案</a>
     <a href="/entry">填写数据</a>

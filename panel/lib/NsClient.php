@@ -172,6 +172,23 @@ final class NsClient
         return is_array($body) ? $body : [];
     }
 
+    /**
+     * sgv entries across a multi-day range, fetched one day at a time so the
+     * per-request result cap never truncates a long report window.
+     */
+    public function entriesBetween(string $device, int $startMs, int $endMs): array
+    {
+        $dayMs = 86400 * 1000;
+        $all = [];
+        for ($cursor = $startMs; $cursor < $endMs; $cursor += $dayMs) {
+            $chunkEnd = min($cursor + $dayMs, $endMs);
+            foreach ($this->entriesInRange($device, 'sgv', $cursor, $chunkEnd, 400) as $entry) {
+                $all[] = $entry;
+            }
+        }
+        return $all;
+    }
+
     /** Latest device status record attributed to one device (iob/cob/battery). */
     public function latestDeviceStatus(string $device): ?array
     {
