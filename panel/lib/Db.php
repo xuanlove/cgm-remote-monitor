@@ -17,10 +17,18 @@ final class Db
             if (!is_dir($dir)) {
                 mkdir($dir, 0770, true);
             }
-            self::$pdo = new \PDO('sqlite:' . $dir . '/panel.db');
+            // PANEL_DB lets deployments (and tests) point at another file; the
+            // default lives next to the code so a checkout runs out of the box.
+            $env = getenv('PANEL_DB');
+            $file = ($env !== false && $env !== '') ? $env : $dir . '/panel.db';
+            self::$pdo = new \PDO('sqlite:' . $file);
             self::$pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
             self::$pdo->setAttribute(\PDO::ATTR_DEFAULT_FETCH_MODE, \PDO::FETCH_ASSOC);
+            // WAL keeps the web readers and the sync CLI from blocking each
+            // other; busy_timeout absorbs the short write locks.
             self::$pdo->exec('PRAGMA journal_mode = WAL');
+            self::$pdo->exec('PRAGMA busy_timeout = 5000');
+            self::$pdo->exec('PRAGMA synchronous = NORMAL');
             self::$pdo->exec('PRAGMA foreign_keys = ON');
             self::migrate();
         }
@@ -58,15 +66,97 @@ final class Db
                 FOREIGN KEY (user_id) REFERENCES panel_users(id) ON DELETE CASCADE
             )'
         );
+        // Local mirror filled by bin/sync.php. The web layer only reads these
+        // tables, so a page load never waits on Nightscout.
         self::$pdo->exec(
-            'CREATE TABLE IF NOT EXISTS panel_day_cache (
+            'CREATE TABLE IF NOT EXISTS panel_entries (
                 user_id INTEGER NOT NULL,
-                day TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                cached_at TEXT NOT NULL,
-                PRIMARY KEY (user_id, day),
-                FOREIGN KEY (user_id) REFERENCES panel_users(id) ON DELETE CASCADE
+                ns_id TEXT NOT NULL,
+                type TEXT NOT NULL,
+                device TEXT NOT NULL,
+                ts INTEGER NOT NULL,
+                sgv REAL,
+                direction TEXT,
+                delta REAL,
+                raw TEXT NOT NULL,
+                fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, ns_id)
             )'
+        );
+        self::$pdo->exec(
+            'CREATE INDEX IF NOT EXISTS idx_panel_entries_user_ts
+                ON panel_entries (user_id, type, ts)'
+        );
+        self::$pdo->exec(
+            'CREATE TABLE IF NOT EXISTS panel_treatments (
+                user_id INTEGER NOT NULL,
+                ns_id TEXT NOT NULL,
+                created_at TEXT,
+                event_type TEXT,
+                payload TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (user_id, ns_id)
+            )'
+        );
+        self::$pdo->exec(
+            'CREATE INDEX IF NOT EXISTS idx_panel_treatments_user_created
+                ON panel_treatments (user_id, created_at)'
+        );
+        self::$pdo->exec(
+            'CREATE TABLE IF NOT EXISTS panel_devicestatus (
+                user_id INTEGER PRIMARY KEY,
+                ns_id TEXT,
+                ts INTEGER,
+                payload TEXT NOT NULL,
+                fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )'
+        );
+        self::$pdo->exec(
+            'CREATE TABLE IF NOT EXISTS panel_profiles (
+                ns_id TEXT PRIMARY KEY,
+                start_date TEXT,
+                payload TEXT NOT NULL,
+                fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )'
+        );
+        self::$pdo->exec(
+            'CREATE TABLE IF NOT EXISTS panel_sync_state (
+                user_id INTEGER NOT NULL,
+                stream TEXT NOT NULL,
+                cursor_ms INTEGER NOT NULL DEFAULT 0,
+                last_ok_at TEXT,
+                last_error TEXT,
+                error_count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (user_id, stream)
+            )'
+        );
+        self::$pdo->exec(
+            'CREATE TABLE IF NOT EXISTS panel_sync_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                stream TEXT NOT NULL,
+                started_at TEXT NOT NULL,
+                duration_ms INTEGER NOT NULL DEFAULT 0,
+                inserted INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL,
+                message TEXT
+            )'
+        );
+        self::$pdo->exec(
+            'CREATE TABLE IF NOT EXISTS panel_alert_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                ts INTEGER NOT NULL,
+                kind TEXT NOT NULL,
+                value_mmol REAL NOT NULL,
+                limit_mmol REAL NOT NULL,
+                delivered INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )'
+        );
+        self::$pdo->exec(
+            'CREATE INDEX IF NOT EXISTS idx_panel_alert_events_user_ts
+                ON panel_alert_events (user_id, delivered, ts)'
         );
     }
 

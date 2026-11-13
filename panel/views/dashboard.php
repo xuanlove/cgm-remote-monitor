@@ -8,7 +8,7 @@
     <span style="font-size:20px;" id="latestDir"></span>
     <span class="hint" id="latestDelta"></span>
     <span style="flex:1;"></span>
-    <span class="hint" id="liveState"><?= t('dash.live.connecting') ?></span>
+    <span class="hint" id="liveState"><?= t('dash.live.polling') ?></span>
     <span class="hint" id="chipIob"><?= t('dash.chip.iob', ['value' => '-']) ?></span>
     <span class="hint" id="chipCob"><?= t('dash.chip.cob', ['value' => '-']) ?></span>
     <span class="hint" id="chipBattery"><?= t('dash.chip.battery', ['value' => '-']) ?></span>
@@ -66,6 +66,7 @@ const I18N = <?= \NightPanel\Lang::js([
     'dash.live.retry',
     'dash.live.error',
     'dash.live.polling',
+    'dash.live.stale',
     'status.low',
     'status.high',
     'status.veryHigh',
@@ -79,6 +80,7 @@ const I18N = <?= \NightPanel\Lang::js([
     'col.time',
 ]) ?>;
 const LOCALE = <?= json_encode(\NightPanel\Lang::htmlLang()) ?>;
+const CSRF = <?= json_encode(\NightPanel\Auth::csrfToken()) ?>;
 
 /* mg/dL → mmol/L */
 const MGDL_TO_MMOL = 18;
@@ -119,6 +121,7 @@ function smoothSeries (points) {
 }
 
 let chart = null;
+let newestTs = 0;
 
 async function loadAll() {
   const hours = document.getElementById('hours').value;
@@ -151,6 +154,10 @@ async function loadAll() {
     .sort((a, b) => a.ts - b.ts);
 
   const shown = smooth && entries.length > 2 ? smoothSeries(entries) : entries;
+  if (!dateVal && entries.length > 0) {
+    newestTs = entries[entries.length - 1].ts;
+    lastRenderedTs = newestTs;
+  }
 
   /* 状态条：最新值 + 趋势箭头 + delta（entry 缺 delta 时用相邻差值兜底） */
   if (entries.length > 0) {
@@ -166,6 +173,12 @@ async function loadAll() {
     document.getElementById('latestSgv').textContent = '--';
     document.getElementById('latestDir').textContent = '';
     document.getElementById('latestDelta').textContent = '';
+  }
+
+  /* 数据新鲜度（同步游标）与服务端告警事件 */
+  if (!dateVal) {
+    showFreshness(glucose.sync);
+    consumeAlertEvents(glucose.alert_events || [], glucose.alerts);
   }
 
   /* 设备状态 chips：IOB / COB / 上传器电量（缺字段显示 -） */
@@ -387,17 +400,9 @@ function evaluateAlerts (value, settings) {
     .replace(':value', value.toFixed(1))
     .replace(':limit', isLow ? settings.low : settings.high);
 
-  // Only notify on a fresh crossing, not on every refresh inside the same zone.
-  if (alertState !== state) {
-    alertState = state;
-    maybeNotify(
-      isLow ? I18N['alert.lowTitle'] : I18N['alert.highTitle'],
-      I18N['alert.body']
-        .replace(':value', value.toFixed(1))
-        .replace(':limit', isLow ? settings.low : settings.high),
-      settings
-    );
-  }
+  // Notifications are driven by the server-side alert events below; the banner
+  // only mirrors the current reading so it updates between syncs.
+  alertState = state;
 }
 
 function maybeNotify (title, body, settings) {
@@ -409,9 +414,10 @@ function maybeNotify (title, body, settings) {
 }
 
 /* ============================================================
- * D1 实时推送：SSE 有新读数时更新状态条并追加数据点
+ * P3 轮询：cron 把 Nightscout 数据写进本地镜像，页面每 30s 读取一次
  * ============================================================ */
-let lastStreamTs = 0;
+const POLL_MS = 30000;
+let lastRenderedTs = 0;
 
 function setLiveState (text, color) {
   const el = document.getElementById('liveState');
@@ -419,47 +425,65 @@ function setLiveState (text, color) {
   el.style.color = color;
 }
 
-function applyStreamReading (payload) {
-  if (!payload || !payload.ts || payload.ts <= lastStreamTs) return;
-  lastStreamTs = payload.ts;
-
-  document.getElementById('latestSgv').textContent = payload.v.toFixed(1);
-  document.getElementById('latestDir').textContent = DIR_ARROWS[payload.direction] || '';
-  document.getElementById('latestDelta').textContent =
-    fmtDelta(payload.delta != null ? payload.delta / MGDL_TO_MMOL : null) || '';
-
-  const g = window.__glucosePayload;
-  if (g) evaluateAlerts(payload.v, g.alerts);
-
-  // A new point arrived: re-render the chart rather than patching it, so the
-  // smoothing toggle and the target band stay consistent.
-  if (!document.getElementById('historyDate').value) loadAll();
+function fmtAge (sec) {
+  if (sec < 60) return sec + 's';
+  if (sec < 3600) return Math.round(sec / 60) + 'm';
+  return Math.round(sec / 3600) + 'h';
 }
 
-function connectStream () {
-  if (typeof EventSource === 'undefined') {
+/* 同步游标的新鲜度：超过 10 分钟视为数据延迟 */
+function showFreshness (sync) {
+  if (!sync || sync.age_sec == null) {
     setLiveState(I18N['dash.live.polling'], '#8b95a9');
     return;
   }
-  const source = new EventSource('/stream');
+  if (sync.age_sec > 600) {
+    setLiveState(I18N['dash.live.stale'].replace(':age', fmtAge(sync.age_sec)), '#e0a05a');
+  } else {
+    setLiveState(I18N['dash.live.live'], '#3fb27f');
+  }
+}
 
-  source.addEventListener('open', () => setLiveState(I18N['dash.live.live'], '#3fb27f'));
-  source.addEventListener('reading', ev => {
-    try { applyStreamReading(JSON.parse(ev.data)); } catch (e) { }
+/* 服务端告警事件：cron 生成，浏览器只负责通知并回执 */
+function consumeAlertEvents (events, settings) {
+  if (!events || !events.length) return;
+  const seen = new Set();
+  events.forEach(ev => {
+    if (seen.has(ev.kind)) return;   // one notification per side per poll
+    seen.add(ev.kind);
+    const isLow = ev.kind === 'low';
+    maybeNotify(
+      isLow ? I18N['alert.lowTitle'] : I18N['alert.highTitle'],
+      I18N['alert.body']
+        .replace(':value', (+ev.value_mmol).toFixed(1))
+        .replace(':limit', (+ev.limit_mmol).toFixed(1)),
+      settings
+    );
   });
-  source.addEventListener('streamerror', () => {
+  fetch('/data/alerts/ack', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': CSRF },
+    body: JSON.stringify({ ids: events.map(ev => ev.id) })
+  }).catch(() => { /* ack failures only cause a repeat next poll */ });
+}
+
+async function pollOnce () {
+  if (document.hidden) return;
+  if (document.getElementById('historyDate').value) return;   // history mode
+  try {
+    const g = await fetch('/data/glucose.json', { cache: 'no-store' }).then(r => r.json());
+    window.__glucosePayload = g;
+    showFreshness(g.sync);
+    consumeAlertEvents(g.alert_events || [], g.alerts);
+
+    const last = (g.entries && g.entries.length) ? g.entries[g.entries.length - 1] : null;
+    const ts = last ? (last.mills || (last.date ? +last.date : Date.parse(last.dateString))) : 0;
+    if (ts > lastRenderedTs) {
+      loadAll();   // new reading (or backfill) arrived: rebuild the chart
+    }
+  } catch (e) {
     setLiveState(I18N['dash.live.error'], '#e05a5a');
-  });
-  source.addEventListener('bye', () => {
-    // The server closes the stream after ~2 minutes; reconnect deliberately so
-    // the interval is explicit instead of relying on the browser's backoff.
-    source.close();
-    setLiveState(I18N['dash.live.retry'], '#e0a05a');
-    setTimeout(connectStream, 1500);
-  });
-  source.addEventListener('error', () => {
-    setLiveState(I18N['dash.live.retry'], '#e0a05a');
-  });
+  }
 }
 
 window.addEventListener('resize', () => chart && chart.resize());
@@ -468,10 +492,14 @@ window.addEventListener('resize', () => chart && chart.resize());
 new MutationObserver(() => loadAll())
   .observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
 
-/* Slow safety net: the stream carries new readings, this only refreshes the
+/* The poll keeps readings current; this slower sweep still refreshes the
  * treatments table and the profile-derived band. */
 setInterval(() => { if (!document.getElementById('historyDate').value) loadAll(); }, 5 * 60 * 1000);
+setInterval(pollOnce, POLL_MS);
+
+/* Poll immediately when the tab becomes visible again. */
+document.addEventListener('visibilitychange', () => { if (!document.hidden) pollOnce(); });
 
 loadAll();
-connectStream();
+pollOnce();
 </script>

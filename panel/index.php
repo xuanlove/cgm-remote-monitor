@@ -4,21 +4,25 @@ declare(strict_types=1);
 require __DIR__ . '/lib/Db.php';
 require __DIR__ . '/lib/Auth.php';
 require __DIR__ . '/lib/NsClient.php';
+require __DIR__ . '/lib/Config.php';
+require __DIR__ . '/lib/Mirror.php';
+require __DIR__ . '/lib/Sync.php';
 require __DIR__ . '/lib/TreatmentTypes.php';
 require __DIR__ . '/lib/GlucoseStats.php';
 require __DIR__ . '/lib/Alerts.php';
-require __DIR__ . '/lib/ReportCache.php';
 require __DIR__ . '/lib/Lang.php';
 require __DIR__ . '/lib/helpers.php';
 
 use NightPanel\Alerts;
 use NightPanel\Auth;
+use NightPanel\Config;
 use NightPanel\Db;
 use NightPanel\GlucoseStats;
 use NightPanel\Lang;
+use NightPanel\Mirror;
 use NightPanel\NsClient;
 use NightPanel\NsException;
-use NightPanel\ReportCache;
+use NightPanel\Sync;
 use NightPanel\TreatmentTypes;
 
 Auth::boot();
@@ -29,34 +33,17 @@ Auth::bootstrapAdmin();
 
 function nsBaseUrl(): string
 {
-    $env = getenv('NIGHTSCOUT_URL');
-    if ($env !== false && $env !== '') {
-        return rtrim($env, '/');
-    }
-    return rtrim((string)(Db::setting('ns_url') ?? ''), '/');
+    return Config::baseUrl();
 }
 
 function nsAdminSecret(): string
 {
-    $env = getenv('NIGHTSCOUT_ADMIN_SECRET');
-    if ($env !== false && $env !== '') {
-        return $env;
-    }
-    return (string)(Db::setting('ns_secret') ?? '');
+    return Config::adminSecret();
 }
 
 function nsClient(): NsClient
 {
-    static $client = null;
-    if ($client === null) {
-        $url = nsBaseUrl();
-        $secret = nsAdminSecret();
-        if ($url === '' || $secret === '') {
-            throw new NsException(Lang::t('err.nsNotConfigured'));
-        }
-        $client = new NsClient($url, $secret);
-    }
-    return $client;
+    return Config::client();
 }
 
 function view(string $name, array $vars = []): void
@@ -172,19 +159,89 @@ function defaultProfileTemplate(): array
 }
 
 /**
- * Readings for the session user across a range (cached per finished day).
+ * Readings for the session user across a range, straight from the local
+ * mirror filled by bin/sync.php (no outbound Nightscout call).
  *
  * @return array<int,array{ts:int,v:float,sgv:float,direction:?string,delta:?float,dateString:string}>
  */
 function fetch_readings(array $user, int $startMs, int $endMs): array
 {
-    return ReportCache::readings(
-        nsClient(),
-        (int)$user['id'],
-        (string)$user['username'],
-        $startMs,
-        $endMs
-    );
+    return Mirror::readings((int)$user['id'], $startMs, $endMs);
+}
+
+/**
+ * Profile records, newest first. The mirror is authoritative; the live read is
+ * only a cold-start fallback for a panel that has not run its first sync yet.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function profile_records(): array
+{
+    $records = Mirror::profiles();
+    if ($records !== []) {
+        return $records;
+    }
+    return nsClient()->profiles();
+}
+
+/** The profile record currently in effect. */
+function profile_record(): ?array
+{
+    $record = Mirror::profileRecord();
+    if ($record !== null) {
+        return $record;
+    }
+    return nsClient()->currentProfileRecord();
+}
+
+/** One treatment for ownership checks, mirror first with a live fallback. */
+function find_treatment(array $user, string $id): ?array
+{
+    $record = Mirror::treatmentById((int)$user['id'], $id);
+    if ($record !== null) {
+        return $record;
+    }
+    try {
+        return nsClient()->treatmentById($id);
+    } catch (NsException $e) {
+        return null;
+    }
+}
+
+/**
+ * Best-effort refresh after a write, so the mirrored view is consistent right
+ * away. Failures are ignored: the scheduled run is the safety net.
+ *
+ * @param array<int,string> $streams
+ */
+function sync_now(array $user, array $streams = ['entries', 'treatments']): void
+{
+    try {
+        (new Sync(nsClient()))->user($user, $streams, false, 2);
+    } catch (\Throwable $e) {
+        // ignore: cron will catch up
+    }
+}
+
+/** Refresh the shared profile snapshot after a profile write. */
+function sync_profiles_now(): void
+{
+    try {
+        (new Sync(nsClient()))->profiles();
+    } catch (\Throwable $e) {
+        // ignore: cron will catch up
+    }
+}
+
+/** The session user's own profile store entry, or null. */
+function profile_for_user(array $user): ?array
+{
+    try {
+        $record = profile_record();
+    } catch (NsException $e) {
+        return null;
+    }
+    return $record['store'][$user['username']] ?? null;
 }
 
 /** Clamp the export/report window to the supported range. */
@@ -242,7 +299,7 @@ function self_target(array $profile, string $field, float $fallback): float
 function collect_plans(string $username): array
 {
     $plans = [];
-    foreach (nsClient()->profiles() as $index => $record) {
+    foreach (profile_records() as $index => $record) {
         if (!isset($record['store'][$username])) {
             continue;
         }
@@ -366,13 +423,11 @@ try {
 
         case $path === '/data/glucose.json' && $method === 'GET':
             $user = Auth::requireUser();
-            // Attribution is taken from the session, never from the request.
-            $device = $user['username'];
-            $client = nsClient();
+            $userId = (int)$user['id'];
 
             // A ?date=YYYY-MM-DD parameter rewinds to a whole historical day;
             // without it the default window is "today" (the client narrows it
-            // to its selected hour span).
+            // to its selected hour span). Reads come from the local mirror.
             if (!empty($_GET['date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$_GET['date'])) {
                 $startMs = strtotime($_GET['date'] . ' 00:00:00') * 1000;
                 $endMs = strtotime($_GET['date'] . ' 23:59:59') * 1000 + 60000;
@@ -381,90 +436,43 @@ try {
                 $startMs = $endMs - 30 * 3600 * 1000;
             }
 
-            $entries = $client->entriesInRange($device, 'sgv', $startMs, $endMs, 1500);
-            $mbg = $client->entriesInRange($device, 'mbg', $startMs, $endMs, 100);
-            $profileRecord = $client->currentProfileRecord();
-            $own = $profileRecord['store'][$user['username']] ?? null;
-            $status = $client->latestDeviceStatus($device);
+            $freshness = Mirror::freshness($userId);
+            if ($freshness['age_sec'] !== null) {
+                header('X-Data-Age: ' . $freshness['age_sec']);
+            }
+
+            try {
+                $profileRecord = profile_record();
+            } catch (NsException $e) {
+                // Mirror-only mode: a cold start with Nightscout down still
+                // renders whatever has been synced so far.
+                $profileRecord = null;
+            }
+
             json_out([
-                'entries' => $entries,
-                'mbg' => $mbg,
-                'devicestatus' => $status,
-                'profile' => $own,
-                'alerts' => Alerts::load((int)$user['id']),
+                'entries' => Mirror::rawEntries($userId, 'sgv', $startMs, $endMs, 2000),
+                'mbg' => Mirror::rawEntries($userId, 'mbg', $startMs, $endMs, 200),
+                'devicestatus' => Mirror::latestDeviceStatus($userId),
+                'profile' => $profileRecord['store'][$user['username']] ?? null,
+                'alerts' => Alerts::load($userId),
+                'sync' => $freshness,
+                'alert_events' => Mirror::undeliveredAlerts($userId, (int)round(microtime(true) * 1000) - 15 * 60 * 1000),
             ]);
 
         case $path === '/data/treatments.json' && $method === 'GET':
             $user = Auth::requireUser();
-            $treatments = nsClient()->treatmentsByUser($user['username'], 100);
-            json_out(['treatments' => $treatments]);
+            json_out(['treatments' => Mirror::recentTreatments((int)$user['id'], 100)]);
 
-        /* ------------------------------------------- D1 实时推送（SSE） */
+        /* ---------------------------------- P4 服务端告警事件确认（已展示） */
 
-        case $path === '/stream' && $method === 'GET':
+        case $path === '/data/alerts/ack' && $method === 'POST':
             $user = Auth::requireUser();
-
-            // The stream stays open, so the session lock has to be released
-            // first: otherwise this browser could not load any other panel page
-            // while the dashboard is listening.
-            session_write_close();
-            set_time_limit(0);
-
-            header('Content-Type: text/event-stream; charset=utf-8');
-            header('Cache-Control: no-cache, no-store');
-            header('X-Accel-Buffering: no');
-            while (ob_get_level() > 0) {
-                ob_end_flush();
+            if (!hash_equals(Auth::csrfToken(), (string)($_SERVER['HTTP_X_CSRF_TOKEN'] ?? ''))) {
+                json_out(['error' => 'invalid csrf token'], 403);
             }
-
-            $device = (string)$user['username'];
-            $deadline = time() + 110;
-            $lastTs = 0;
-            $first = true;
-
-            while (time() < $deadline && !connection_aborted()) {
-                try {
-                    $records = nsClient()->entriesByDevice($device, 1);
-                    $entry = $records[0] ?? null;
-                    if ($entry !== null) {
-                        $ts = (int)($entry['date'] ?? 0);
-                        // The first pass always sends the latest reading so the
-                        // page renders immediately after connecting.
-                        if ($ts > $lastTs || $first) {
-                            $lastTs = $ts;
-                            echo "event: reading\n";
-                            echo 'data: ' . json_encode([
-                                'ts' => $ts,
-                                'sgv' => (float)$entry['sgv'],
-                                'v' => round(((float)$entry['sgv']) / 18, 2),
-                                'direction' => $entry['direction'] ?? null,
-                                'delta' => $entry['delta'] ?? null,
-                            ], JSON_UNESCAPED_SLASHES) . "\n\n";
-                        } else {
-                            echo ": ping\n\n";
-                        }
-                    } else {
-                        echo ": ping\n\n";
-                    }
-                    @flush();
-                } catch (NsException $e) {
-                    echo "event: streamerror\n";
-                    echo 'data: ' . json_encode(['message' => $e->getMessage()], JSON_UNESCAPED_SLASHES) . "\n\n";
-                    @flush();
-                    break;
-                } catch (\Throwable $e) {
-                    break;
-                }
-                $first = false;
-                sleep(8);
-            }
-
-            // Leaving ends the response; EventSource reconnects on its own, so
-            // a long-lived stream never pins a worker for good.
-            echo "event: bye\n";
-            echo "data: {}\n\n";
-            @flush();
-            exit;
+            $payload = json_decode((string)file_get_contents('php://input'), true);
+            $ids = is_array($payload) && isset($payload['ids']) && is_array($payload['ids']) ? $payload['ids'] : [];
+            json_out(['acked' => Mirror::ackAlerts((int)$user['id'], $ids)]);
 
         /* ------------------------------------------- D2 个人提醒线设置 */
 
@@ -492,16 +500,19 @@ try {
 
         case $path === '/profile' && $method === 'GET':
             $user = Auth::requireUser();
-            $record = nsClient()->currentProfileRecord();
-            $own = $record['store'][$user['username']] ?? null;
-            view('profile', ['user' => $user, 'profile' => $own, 'error' => null, 'success' => null]);
+            view('profile', [
+                'user' => $user,
+                'profile' => profile_for_user($user),
+                'error' => null,
+                'success' => null,
+            ]);
             break;
 
         case $path === '/profile' && $method === 'POST':
             $user = Auth::requireUser();
             Auth::assertCsrf($_POST['csrf'] ?? null);
             try {
-                $record = nsClient()->currentProfileRecord();
+                $record = profile_record();
                 if ($record === null || !isset($record['store'][$user['username']])) {
                     throw new NsException('Profile record missing');
                 }
@@ -538,21 +549,20 @@ try {
                 $client = nsClient();
                 $body = ['_id' => (string)$record['_id'], 'store' => [$user['username'] => $own]];
                 $client->requestOrThrow('PUT', '/api/v1/profile.json', $body, $token);
+                sync_profiles_now();
 
                 view('profile', ['user' => $user, 'profile' => $own, 'error' => null, 'success' => true]);
             } catch (\InvalidArgumentException $e) {
-                $record = nsClient()->currentProfileRecord();
                 view('profile', [
                     'user' => $user,
-                    'profile' => $record['store'][$user['username']] ?? null,
+                    'profile' => profile_for_user($user),
                     'error' => Lang::t('msg.saveFailed', ['msg' => $e->getMessage()]),
                     'success' => null,
                 ]);
             } catch (NsException $e) {
-                $record = nsClient()->currentProfileRecord();
                 view('profile', [
                     'user' => $user,
-                    'profile' => $record['store'][$user['username']] ?? null,
+                    'profile' => profile_for_user($user),
                     'error' => Lang::t('msg.saveFailed', ['msg' => $e->getMessage()]),
                     'success' => null,
                 ]);
@@ -603,6 +613,9 @@ try {
                     default:
                         throw new \InvalidArgumentException(Lang::t('val.unknownKind'));
                 }
+                // Pull the new record into the mirror before rendering, so the
+                // next page load already shows it.
+                sync_now($user, $kind === 'glucose' ? ['entries'] : ['treatments']);
                 view('entry', [
                     'user' => $user,
                     'types' => TreatmentTypes::types(),
@@ -636,11 +649,10 @@ try {
 
         case $path === '/treatments' && $method === 'GET':
             $user = Auth::requireUser();
-            $client = nsClient();
             $editing = null;
             $editId = (string)($_GET['edit'] ?? '');
             if ($editId !== '') {
-                $existing = $client->treatmentById($editId);
+                $existing = find_treatment($user, $editId);
                 // Ownership is decided here, never by what the request claims.
                 if ($existing !== null && self_owned($existing, $user)) {
                     $editing = $existing;
@@ -650,7 +662,7 @@ try {
                 'user' => $user,
                 'types' => TreatmentTypes::types(),
                 'fields' => TreatmentTypes::fields(),
-                'treatments' => $client->treatmentsByUser($user['username'], 100),
+                'treatments' => Mirror::recentTreatments((int)$user['id'], 100),
                 'editing' => $editing,
                 'error' => null,
                 'success' => null,
@@ -662,14 +674,14 @@ try {
             Auth::assertCsrf($_POST['csrf'] ?? null);
             $client = nsClient();
             $id = (string)($_POST['_id'] ?? '');
-            $existing = $id !== '' ? $client->treatmentById($id) : null;
+            $existing = $id !== '' ? find_treatment($user, $id) : null;
             if ($existing === null || !self_owned($existing, $user)) {
                 http_response_code(403);
                 view('treatments', [
                     'user' => $user,
                     'types' => TreatmentTypes::types(),
                     'fields' => TreatmentTypes::fields(),
-                    'treatments' => $client->treatmentsByUser($user['username'], 100),
+                    'treatments' => Mirror::recentTreatments((int)$user['id'], 100),
                     'editing' => null,
                     'error' => Lang::t('val.notOwner'),
                     'success' => null,
@@ -688,6 +700,7 @@ try {
                 $updated['enteredBy'] = (string)$existing['enteredBy'];
                 $updated['created_at'] = (string)($existing['created_at'] ?? gmdate('c'));
                 $client->updateTreatment($updated);
+                sync_now($user, ['treatments']);
                 header('Location: /treatments');
                 exit;
             } catch (\InvalidArgumentException $e) {
@@ -695,7 +708,7 @@ try {
                     'user' => $user,
                     'types' => TreatmentTypes::types(),
                     'fields' => TreatmentTypes::fields(),
-                    'treatments' => $client->treatmentsByUser($user['username'], 100),
+                    'treatments' => Mirror::recentTreatments((int)$user['id'], 100),
                     'editing' => $existing,
                     'error' => Lang::t('msg.saveFailed', ['msg' => $e->getMessage()]),
                     'success' => null,
@@ -705,7 +718,7 @@ try {
                     'user' => $user,
                     'types' => TreatmentTypes::types(),
                     'fields' => TreatmentTypes::fields(),
-                    'treatments' => $client->treatmentsByUser($user['username'], 100),
+                    'treatments' => Mirror::recentTreatments((int)$user['id'], 100),
                     'editing' => $existing,
                     'error' => Lang::t('msg.saveFailed', ['msg' => $e->getMessage()]),
                     'success' => null,
@@ -716,11 +729,11 @@ try {
         case $path === '/treatments/delete' && $method === 'POST':
             $user = Auth::requireUser();
             Auth::assertCsrf($_POST['csrf'] ?? null);
-            $client = nsClient();
             $id = (string)($_POST['_id'] ?? '');
-            $existing = $id !== '' ? $client->treatmentById($id) : null;
+            $existing = $id !== '' ? find_treatment($user, $id) : null;
             if ($existing !== null && self_owned($existing, $user)) {
-                $client->deleteTreatment($id);
+                nsClient()->deleteTreatment($id);
+                sync_now($user, ['treatments']);
             }
             header('Location: /treatments');
             exit;
@@ -743,7 +756,7 @@ try {
             $planId = (string)($_POST['_id'] ?? '');
             $error = null;
             try {
-                $records = nsClient()->profiles();
+                $records = profile_records();
                 $source = null;
                 foreach ($records as $record) {
                     if ((string)$record['_id'] === $planId) { $source = $record; break; }
@@ -767,6 +780,7 @@ try {
                     'defaultProfile' => $active['defaultProfile'] ?? $user['username'],
                     'startDate' => gmdate('c'),
                 ]);
+                sync_profiles_now();
             } catch (\InvalidArgumentException $e) {
                 $error = $e->getMessage();
             } catch (NsException $e) {
@@ -782,7 +796,7 @@ try {
             $planId = (string)($_POST['_id'] ?? '');
             $error = null;
             try {
-                $records = nsClient()->profiles();
+                $records = profile_records();
                 $target = null;
                 $index = -1;
                 foreach ($records as $i => $record) {
@@ -801,6 +815,7 @@ try {
                     throw new \InvalidArgumentException(Lang::t('val.planActive'));
                 }
                 nsClient()->requestOrThrow('DELETE', '/api/v1/profile/' . rawurlencode($planId));
+                sync_profiles_now();
             } catch (\InvalidArgumentException $e) {
                 $error = $e->getMessage();
             } catch (NsException $e) {
@@ -823,8 +838,7 @@ try {
 
             // The user's own profile target decides "目标范围"; the consensus
             // 3.9-10.0 band decides TIR/TAR/TBR.
-            $record = nsClient()->currentProfileRecord();
-            $own = $record['store'][$user['username']] ?? [];
+            $own = profile_for_user($user) ?? [];
             $targetLow = self_target($own, 'target_low', 3.9);
             $targetHigh = self_target($own, 'target_high', 10.0);
 
@@ -890,7 +904,7 @@ try {
             $endMs = (int)round(microtime(true) * 1000);
             $startMs = $endMs - $days * 86400 * 1000;
             $rows = [];
-            $treatments = nsClient()->treatmentsBetween($user['username'], $startMs, $endMs);
+            $treatments = Mirror::treatmentsBetween((int)$user['id'], $startMs, $endMs);
             usort($treatments, static fn(array $a, array $b): int => strcmp((string)($a['created_at'] ?? ''), (string)($b['created_at'] ?? '')));
             foreach ($treatments as $t) {
                 $rows[] = [

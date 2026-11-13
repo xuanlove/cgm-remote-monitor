@@ -8,35 +8,125 @@
   1. **Nightscout 权限改造**（本仓库内）：`api:profile:<name>:read/write` 作用域权限——token 直读 profile 只返回 `store[<name>]`，写入被服务端强制合并/剥离（见 `lib/api/profile/index.js`、`lib/authorization/index.js`）
   2. **面板归属过滤**：entries 按 `device=<username>`、treatments/activity 按 `enteredBy=<username>` 过滤，写入时强制注入归属
   3. **最小 token 权限**：用户 token 只有 profile 作用域读写 + 各集合 create（无任何 read）
-- 面板发actions放：Nightscout 地址 + 用户 token + 面板网关说明（/myapi 页）
+- 面板发放：Nightscout 地址 + 用户 token + 面板网关说明（/myapi 页）
 
 ## 依赖
 
 - PHP 8+（curl、openssl、pdo_sqlite、sqlite3）
 - 本仓库的 Nightscout 实例（先 `npm ci && npm run bundle` 构建）
 
-## 启动
+## 运行模式：Web 只读本地镜像，计划任务拉取 Nightscout
+
+```
+浏览器 ──> nginx/Apache ──> php-fpm ──> SQLite 镜像（毫秒级，只读）
+                              │
+                              └─ 写入类操作 ──> Nightscout API（成功即触发该用户增量同步）
+
+cron/systemd timer ──> panel/bin/sync.php ──> Nightscout API
+```
+
+- Web 请求**不再直接访问 Nightscout**：`/data/*.json`、报告、导出、Profile/治疗列表全部读 `panel_entries` / `panel_treatments` / `panel_devicestatus` / `panel_profiles`。
+- `bin/sync.php` 按用户增量拉取：每条流在 `panel_sync_state` 里保存毫秒游标，并回看 6 小时重叠窗口（CGM 补传不会漏），按 Nightscout `_id` 幂等 upsert。
+- 实时性由 30 秒轮询替代原 SSE，不再长期占用 php-fpm worker。
+- 写入（填写数据 / 治疗编辑 / Profile / 方案）仍直连 Nightscout（源数据），成功后同步触发一次该用户增量同步，因此列表立即可见。
+- 数据新鲜度：`/data/glucose.json` 返回 `sync.age_sec` 并带 `X-Data-Age` 头；仪表盘超过 10 分钟显示「数据延迟」。
+
+### 生产部署（php-fpm + nginx）
+
+```nginx
+server {
+    listen 80;
+    server_name panel.example.com;
+    root /var/www/cgm-remote-monitor/panel;
+    index index.php;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    }
+    location ~ ^/(data|lib|lang|tests|bin)/ { deny all; }
+}
+```
+
+php-fpm 会清空环境变量，务必在 pool 配置里显式传入：
+
+```ini
+; /etc/php/8.3/fpm/pool.d/panel.conf
+env[NIGHTSCOUT_URL] = http://127.0.0.1:1337
+env[NIGHTSCOUT_ADMIN_SECRET] = <API_SECRET>
+env[PANEL_SECRET_KEY] = <32 位随机串>
+env[PANEL_DB] = /var/lib/nightpanel/panel.db
+```
+
+`panel/data/`（或 `PANEL_DB` 所在目录）需允许 php-fpm 与 cron 的同一用户读写；启用 OPcache。
+
+### 计划任务
+
+```cron
+# 每分钟：增量同步所有用户
+* * * * *   php /var/www/cgm-remote-monitor/panel/bin/sync.php >> /var/log/nightpanel-sync.log 2>&1
+
+# 每 15 分钟：刷新 Profile 快照（全局共享一次请求）
+*/15 * * * * php /var/www/cgm-remote-monitor/panel/bin/sync.php --profiles >> /var/log/nightpanel-sync.log 2>&1
+
+# 每天 03:05：30 天全量校准（修复游标漂移 / 补历史）
+5 3 * * *   php /var/www/cgm-remote-monitor/panel/bin/sync.php --full --days=30 >> /var/log/nightpanel-sync.log 2>&1
+
+# 每天 03:30：保留策略清理
+30 3 * * *  php /var/www/cgm-remote-monitor/panel/bin/cleanup.php >> /var/log/nightpanel-cleanup.log 2>&1
+```
+
+等价 systemd timer（推荐，日志交给 journald）：
+
+```ini
+# /etc/systemd/system/nightpanel-sync.service
+[Service]
+Type=oneshot
+User=www-data
+EnvironmentFile=/etc/nightpanel/env
+ExecStart=/usr/bin/php /var/www/cgm-remote-monitor/panel/bin/sync.php
+
+# /etc/systemd/system/nightpanel-sync.timer
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=60s
+[Install]
+WantedBy=timers.target
+```
+
+运维探活（只读数据库，Nightscout 故障时同样可用）：
 
 ```bash
-# 1. Nightscout —— AUTH_DEFAULT_ROLES=denied 是安全前提（否则默认 readable 角色会泄漏读权限）
+php panel/bin/health.php --stale=600   # 退出码 1 表示有用户数据过期/从未同步
+```
+
+### 本地开发
+
+```bash
+# 0. Nightscout —— AUTH_DEFAULT_ROLES=denied 是安全前提（否则默认 readable 角色会泄漏读权限）
 CUSTOMCONNSTR_mongo="mongodb://127.0.0.1:27017/nsdb" \
 API_SECRET="<你的密钥>" \
 AUTH_DEFAULT_ROLES="denied" \
 INSECURE_USE_HTTP=true PORT=1337 node lib/server/server.js
 
-# 2. 面板
+# 1. 面板
 cd panel
 PANEL_ADMIN_USER=admin PANEL_ADMIN_PASS=<初始密码> \
 PANEL_SECRET_KEY=<32位随机串> \
 NIGHTSCOUT_URL=http://127.0.0.1:1337 \
 NIGHTSCOUT_ADMIN_SECRET=<与上面相同的API_SECRET> \
-PHP_CLI_SERVER_WORKERS=4 \
 php -S 0.0.0.0:8090 router.php
+
+# 另开一个终端跑同步（本地没有 cron 时手动触发）
+php bin/sync.php
+php bin/sync.php --profiles
 ```
 
-`PHP_CLI_SERVER_WORKERS` 让内置服务器多进程处理请求：仪表盘的实时推送（SSE）会占用一个连接约 2 分钟，单进程的 `php -S` 在流打开期间无法响应其他请求，因此本地运行至少给 2 个 worker。生产环境请用 php-fpm + nginx，SSE 需关闭代理缓冲（代码已发送 `X-Accel-Buffering: no`）。
-
-首次访问会自动创建 SQLite（`panel/data/panel.db`）与初始 admin（凭据打印在日志中）。
+首次访问会自动创建 SQLite（`panel/data/panel.db`）与初始 admin（凭据打印在日志中）。内置服务器只用于开发；生产必须用 php-fpm。
 
 ## 环境变量
 
@@ -46,14 +136,15 @@ php -S 0.0.0.0:8090 router.php
 | `NIGHTSCOUT_ADMIN_SECRET` | Nightscout API_SECRET 原文（面板用于管理 API） |
 | `PANEL_ADMIN_USER` / `PANEL_ADMIN_PASS` | 初始管理员（仅首次建库时生效） |
 | `PANEL_SECRET_KEY` | token/密钥加密密钥；未设置时自动生成并落库 |
+| `PANEL_DB` | SQLite 路径（默认 `panel/data/panel.db`；生产建议放到独立可写目录） |
 
 ## 功能页
 
 - `/register` 注册 → 自动创建 `store[<username>]` + 专属角色（`api:profile:<username>:read/write/create` + 各集合 create）+ subject，页面上直接展示发放的地址与 token
-- `/dashboard` 血糖趋势（ECharts，mmol/L）：趋势箭头 + Δ 变化 + IOB/COB/电量、校准血糖（mbg）叠加、任意历史日回看、3 点平滑；新读数经 SSE 实时推送，越线时显示告警横幅
-- `/reports` 统计报告（近 7/14/30/90 天）：TIR/TAR/TBR、血糖分布（5 档）、平均值/中位数/标准差/CV、GMI、低血糖事件（≥15 分钟）、数据覆盖率，以及落在本人 Profile 目标范围的占比；页内可直接导出 CSV/JSON
+- `/dashboard` 血糖趋势（ECharts，mmol/L）：趋势箭头 + Δ 变化 + IOB/COB/电量、校准血糖（mbg）叠加、任意历史日回看、3 点平滑；每 30 秒轮询本地镜像，新读数自动重建图表，数据延迟超过 10 分钟显示提示，越线时显示告警横幅
+- `/reports` 统计报告（近 7/14/30/90 天）：TIR/TAR/TBR、血糖分布（5 档）、平均值/中位数/标准差/CV、GMI、低血糖事件（≥15 分钟）、数据覆盖率，以及落在本人 Profile 目标范围的占比；数据来自本地镜像，页内可直接导出 CSV/JSON
 - `/export/entries.csv|json`、`/export/treatments.csv` 数据导出（按 `?days=` 区间，CSV 带 UTF-8 BOM 可直接用 Excel 打开）
-- `/settings/alerts` 个人提醒线：低/高阈值（存面板数据库，不写入 Nightscout），可同时开启浏览器桌面通知
+- `/settings/alerts` 个人提醒线：低/高阈值（存面板数据库，不写入 Nightscout），可同时开启浏览器桌面通知；阈值由同步任务在服务端评估（无需浏览器打开），事件写入 `panel_alert_events`，页面轮询后通知并回执
 - `/profile` 编辑当前方案的配置档（基础率/敏感系数/目标范围/DIA/碳水速率）——以用户 token 直连提交，Nightscout 服务端强制作用域
 - `/profile/plans` 治疗方案版本：按 startDate 倒序列出，当前生效 / 历史；「启用此方案」以该版本内容写入一条新记录；「保存为新版本」快照当前方案；共用记录与他人档案不可删除
 - `/entry` 填写数据：手填血糖 + 全部治疗事件类型（大剂量/碳水/监测/临时/护理共 20 种，表单字段由服务端注册表驱动）+ 活动记录
@@ -99,4 +190,5 @@ npx env-cmd -f ./tests/ci.test.env npx mocha --timeout 30000 --require ./tests/h
 php panel/tests/glucose-stats-test.php
 php panel/tests/alerts-test.php
 php panel/tests/lang-test.php
+php panel/tests/mirror-test.php    # 镜像表结构、按用户隔离、游标/新鲜度、告警事件
 ```

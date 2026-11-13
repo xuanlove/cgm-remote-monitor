@@ -61,6 +61,7 @@ return [
     'dash.live.retry' => '● Reconnecting',
     'dash.live.error' => '● Data source error',
     'dash.live.polling' => '● Polling mode',
+    'dash.live.stale' => '● Stale data :age',
     'dash.alertsLink' => 'Alerts',
     'dash.empty' => 'No glucose data yet — add a reading under "Add data", or set your CGM uploader\'s device name to your username.',
     'dash.reference' => 'Reference lines: 3.9 / 6.1 mmol/L (fasting default); your own profile target wins when set. Hollow squares are calibrations (mbg). Pick a date to look back, or enable smoothing to reduce noise.',

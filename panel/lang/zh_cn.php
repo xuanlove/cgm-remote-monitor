@@ -61,6 +61,7 @@ return [
     'dash.live.retry' => '● 重连中',
     'dash.live.error' => '● 数据源异常',
     'dash.live.polling' => '● 轮询模式',
+    'dash.live.stale' => '● 数据延迟 :age',
     'dash.alertsLink' => '提醒设置',
     'dash.empty' => '暂无血糖数据 —— 在「填写数据」提交血糖，或将 CGM 上传器的设备名设为你的用户名。',
     'dash.reference' => '参考线：3.9 / 6.1 mmol/L（空腹默认）；若你在「我的 Profile」中设置了目标范围，则以你自己的档案为准。空心方块为校准血糖（mbg）。选择日期回看历史，勾选平滑可降噪。',
