@@ -204,6 +204,15 @@ final class NsClient
         return $this->treatmentQuery('&find[enteredBy]=' . rawurlencode($enteredBy), $count);
     }
 
+    /** Treatments of one user inside a millisecond range (for exports). */
+    public function treatmentsBetween(string $enteredBy, int $startMs, int $endMs): array
+    {
+        $filter = '&find[enteredBy]=' . rawurlencode($enteredBy)
+            . '&find[created_at][$gte]=' . gmdate('c', (int)($startMs / 1000))
+            . '&find[created_at][$lt]=' . gmdate('c', (int)($endMs / 1000));
+        return $this->treatmentQuery($filter, 2000);
+    }
+
     private function treatmentQuery(string $filter, int $count): array
     {
         $path = '/api/v1/treatments.json?count=' . $count . $filter;

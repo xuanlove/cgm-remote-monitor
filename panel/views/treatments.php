@@ -20,6 +20,12 @@
 <?php endif; ?>
 
 <div class="card">
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+    <span class="hint">导出：</span>
+    <a href="/export/treatments.csv?days=14" class="hint">治疗 CSV（14 天）</a>
+    <a href="/export/treatments.csv?days=30" class="hint">治疗 CSV（30 天）</a>
+    <a href="/export/entries.csv?days=14" class="hint">血糖 CSV（14 天）</a>
+  </div>
   <table>
     <thead><tr><th>时间</th><th>类型</th><th>血糖</th><th>碳水</th><th>胰岛素</th><th>时长/基础率</th><th>备注</th><th></th></tr></thead>
     <tbody>

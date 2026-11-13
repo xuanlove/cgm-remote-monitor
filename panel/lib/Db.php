@@ -58,6 +58,16 @@ final class Db
                 FOREIGN KEY (user_id) REFERENCES panel_users(id) ON DELETE CASCADE
             )'
         );
+        self::$pdo->exec(
+            'CREATE TABLE IF NOT EXISTS panel_day_cache (
+                user_id INTEGER NOT NULL,
+                day TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                cached_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, day),
+                FOREIGN KEY (user_id) REFERENCES panel_users(id) ON DELETE CASCADE
+            )'
+        );
     }
 
     /** Encrypt a secret for storage; the key comes from the environment. */

@@ -51,7 +51,8 @@ php -S 0.0.0.0:8090 router.php
 
 - `/register` 注册 → 自动创建 `store[<username>]` + 专属角色（`api:profile:<username>:read/write/create` + 各集合 create）+ subject，页面上直接展示发放的地址与 token
 - `/dashboard` 血糖趋势（ECharts，mmol/L）：趋势箭头 + Δ 变化 + IOB/COB/电量、校准血糖（mbg）叠加、任意历史日回看、3 点平滑；新读数经 SSE 实时推送，越线时显示告警横幅
-- `/reports` 统计报告（近 7/14/30/90 天）：TIR/TAR/TBR、血糖分布（5 档）、平均值/中位数/标准差/CV、GMI、低血糖事件（≥15 分钟）、数据覆盖率，以及落在本人 Profile 目标范围的占比
+- `/reports` 统计报告（近 7/14/30/90 天）：TIR/TAR/TBR、血糖分布（5 档）、平均值/中位数/标准差/CV、GMI、低血糖事件（≥15 分钟）、数据覆盖率，以及落在本人 Profile 目标范围的占比；页内可直接导出 CSV/JSON
+- `/export/entries.csv|json`、`/export/treatments.csv` 数据导出（按 `?days=` 区间，CSV 带 UTF-8 BOM 可直接用 Excel 打开）
 - `/settings/alerts` 个人提醒线：低/高阈值（存面板数据库，不写入 Nightscout），可同时开启浏览器桌面通知
 - `/profile` 编辑当前方案的配置档（基础率/敏感系数/目标范围/DIA/碳水速率）——以用户 token 直连提交，Nightscout 服务端强制作用域
 - `/profile/plans` 治疗方案版本：按 startDate 倒序列出，当前生效 / 历史；「启用此方案」以该版本内容写入一条新记录；「保存为新版本」快照当前方案；共用记录与他人档案不可删除
@@ -59,6 +60,18 @@ php -S 0.0.0.0:8090 router.php
 - `/treatments` 我的记录：列出自己的治疗记录，支持编辑与删除（归属 enteredBy 由服务端校验，无法触达他人记录）
 - `/myapi` 专属地址、token（掩码）、curl 示例、CGM 上传器配置指引
 - `/admin/users` 用户管理、Nightscout 连接状态、删除用户（联动删除 subject）
+
+### 用户 token 的权限
+
+```
+api:profile:<username>:read     读自己的 Profile 档案（他人 store 键被服务端剥离）
+api:profile:<username>:write    更新自己的档案
+api:profile:<username>:create   新建只含自己档案的治疗方案版本
+api:entries:<username>:read     读自己设备上传的血糖（api v1 entries）
+api:entries/treatments/activity/devicestatus:create   上传数据
+```
+
+作用域读只在 v1 entries 生效：`/api/v2/properties`、api3、data 端点仍要求完整的 `api:entries:read`，未授予该权限的 token 在这些入口得到 401，因此作用域不会被绕开。
 
 ### 治疗事件类型
 
@@ -69,7 +82,7 @@ php -S 0.0.0.0:8090 router.php
 Nightscout 权限改造的单元测试：`tests/profile-scoped.test.js`
 
 ```bash
-npx env-cmd -f ./tests/ci.test.env npx mocha --timeout 30000 --require ./tests/hooks.js --exit ./tests/profile-scoped.test.js
+npx env-cmd -f ./tests/ci.test.env npx mocha --timeout 30000 --require ./tests/hooks.js --exit ./tests/profile-scoped.test.js ./tests/entries-scoped.test.js
 ```
 
 面板统计与提醒逻辑的自检（无需任何依赖）：

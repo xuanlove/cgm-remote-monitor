@@ -7,6 +7,7 @@ require __DIR__ . '/lib/NsClient.php';
 require __DIR__ . '/lib/TreatmentTypes.php';
 require __DIR__ . '/lib/GlucoseStats.php';
 require __DIR__ . '/lib/Alerts.php';
+require __DIR__ . '/lib/ReportCache.php';
 
 use NightPanel\Alerts;
 use NightPanel\Auth;
@@ -14,6 +15,7 @@ use NightPanel\Db;
 use NightPanel\GlucoseStats;
 use NightPanel\NsClient;
 use NightPanel\NsException;
+use NightPanel\ReportCache;
 use NightPanel\TreatmentTypes;
 
 Auth::boot();
@@ -120,6 +122,9 @@ function provisionUser(string $username): array
         'api:profile:' . $username . ':read',
         'api:profile:' . $username . ':write',
         'api:profile:' . $username . ':create',
+        // Scoped read: the token can pull its own CGM readings straight from
+        // Nightscout, but never another device's.
+        'api:entries:' . $username . ':read',
         'api:entries:create',
         'api:treatments:create',
         'api:activity:create',
@@ -160,6 +165,44 @@ function defaultProfileTemplate(): array
         'basal' => [[0, 1]],
         'timezone' => 'Asia/Chongqing',
     ];
+}
+
+/**
+ * Readings for the session user across a range (cached per finished day).
+ *
+ * @return array<int,array{ts:int,v:float,sgv:float,direction:?string,delta:?float,dateString:string}>
+ */
+function fetch_readings(array $user, int $startMs, int $endMs): array
+{
+    return ReportCache::readings(
+        nsClient(),
+        (int)$user['id'],
+        (string)$user['username'],
+        $startMs,
+        $endMs
+    );
+}
+
+/** Clamp the export/report window to the supported range. */
+function requested_days(): int
+{
+    $days = (int)($_GET['days'] ?? 14);
+    return max(1, min(90, $days));
+}
+
+/** Stream a CSV download (with BOM so Excel reads UTF-8 correctly). */
+function csv_out(string $filename, array $header, array $rows): void
+{
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+    $out = fopen('php://output', 'w');
+    fwrite($out, "\xEF\xBB\xBF");
+    fputcsv($out, $header);
+    foreach ($rows as $row) {
+        fputcsv($out, $row);
+    }
+    fclose($out);
+    exit;
 }
 
 /**
@@ -757,21 +800,12 @@ try {
 
         case $path === '/reports' && $method === 'GET':
             $user = Auth::requireUser();
-            $days = (int)($_GET['days'] ?? 14);
-            if ($days < 1) { $days = 1; }
-            if ($days > 90) { $days = 90; }
+            $days = requested_days();
 
             $endMs = (int)round(microtime(true) * 1000);
             $startMs = $endMs - $days * 86400 * 1000;
 
-            $entries = nsClient()->entriesBetween($user['username'], $startMs, $endMs);
-            $readings = [];
-            foreach ($entries as $entry) {
-                $ts = isset($entry['date']) ? (int)$entry['date'] : (int)strtotime((string)($entry['dateString'] ?? ''));
-                if ($ts <= 0 || !isset($entry['sgv'])) { continue; }
-                $readings[] = ['ts' => $ts, 'v' => round(((float)$entry['sgv']) / 18, 2)];
-            }
-            usort($readings, static fn(array $a, array $b): int => $a['ts'] <=> $b['ts']);
+            $readings = fetch_readings($user, $startMs, $endMs);
 
             // The user's own profile target decides "目标范围"; the consensus
             // 3.9-10.0 band decides TIR/TAR/TBR.
@@ -791,6 +825,77 @@ try {
                 'error' => null,
             ]);
             break;
+
+        /* -------------------------------------------------- E1 数据导出 */
+
+        case $path === '/export/entries.csv' && $method === 'GET':
+            $user = Auth::requireUser();
+            $days = requested_days();
+            $endMs = (int)round(microtime(true) * 1000);
+            $startMs = $endMs - $days * 86400 * 1000;
+            $rows = [];
+            foreach (fetch_readings($user, $startMs, $endMs) as $reading) {
+                $rows[] = [
+                    gmdate('Y-m-d H:i:s', (int)($reading['ts'] / 1000)),
+                    $reading['sgv'],
+                    $reading['v'],
+                    $reading['direction'] ?? '',
+                    $reading['delta'] ?? '',
+                ];
+            }
+            csv_out(
+                'glucose-' . $user['username'] . '-' . $days . 'd.csv',
+                ['时间(UTC)', '血糖(mg/dL)', '血糖(mmol/L)', '趋势', '变化(mg/dL)'],
+                $rows
+            );
+
+        case $path === '/export/entries.json' && $method === 'GET':
+            $user = Auth::requireUser();
+            $days = requested_days();
+            $endMs = (int)round(microtime(true) * 1000);
+            $startMs = $endMs - $days * 86400 * 1000;
+            $readings = fetch_readings($user, $startMs, $endMs);
+            header('Content-Disposition: attachment; filename="glucose-' . $user['username'] . '-' . $days . 'd.json"');
+            json_out([
+                'user' => $user['username'],
+                'from' => gmdate('c', (int)($startMs / 1000)),
+                'to' => gmdate('c', (int)($endMs / 1000)),
+                'count' => count($readings),
+                'readings' => array_map(static fn(array $r): array => [
+                    'time' => gmdate('c', (int)($r['ts'] / 1000)),
+                    'mgdl' => $r['sgv'],
+                    'mmol' => $r['v'],
+                    'direction' => $r['direction'],
+                    'delta' => $r['delta'],
+                ], $readings),
+            ]);
+
+        case $path === '/export/treatments.csv' && $method === 'GET':
+            $user = Auth::requireUser();
+            $days = requested_days();
+            $endMs = (int)round(microtime(true) * 1000);
+            $startMs = $endMs - $days * 86400 * 1000;
+            $rows = [];
+            $treatments = nsClient()->treatmentsBetween($user['username'], $startMs, $endMs);
+            usort($treatments, static fn(array $a, array $b): int => strcmp((string)($a['created_at'] ?? ''), (string)($b['created_at'] ?? '')));
+            foreach ($treatments as $t) {
+                $rows[] = [
+                    (string)($t['created_at'] ?? ''),
+                    (string)($t['eventType'] ?? ''),
+                    $t['glucose'] ?? '',
+                    $t['carbs'] ?? '',
+                    $t['insulin'] ?? '',
+                    $t['duration'] ?? '',
+                    $t['absolute'] ?? '',
+                    $t['percent'] ?? '',
+                    (string)($t['notes'] ?? ''),
+                ];
+            }
+            csv_out(
+                'treatments-' . $user['username'] . '-' . $days . 'd.csv',
+                ['时间', '类型', '血糖(mg/dL)', '碳水(g)', '胰岛素(U)', '时长(分钟)', '基础率(U/h)', '百分比(%)', '备注'],
+                $rows
+            );
 
         case $path === '/myapi' && $method === 'GET':
             $user = Auth::requireUser();

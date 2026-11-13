@@ -8,10 +8,15 @@
     <tr><th>accessToken</th><td><code id="tok" data-token="<?= htmlspecialchars($token) ?>"><?= htmlspecialchars(substr($token, 0, 6) . '-••••••••••••••••') ?></code>
       <button type="button" style="margin-left:8px;padding:2px 10px;" onclick="const t=document.getElementById('tok');t.textContent=t.dataset.token;">显示</button></td></tr>
   </table>
-  <p class="hint">token 权限：读写以你用户名命名的 Profile 文档（api:profile:<?= htmlspecialchars($user['username']) ?>:read/write）+ 上传血糖/治疗/活动数据（仅创建）。无法读取任何集合数据。</p>
+  <p class="hint">token 权限：读写以你用户名命名的 Profile 文档（api:profile:<?= htmlspecialchars($user['username']) ?>:read/write/create）+ 读取你自己设备上传的血糖（api:entries:<?= htmlspecialchars($user['username']) ?>:read）+ 上传血糖/治疗/活动数据（仅创建）。其他用户的数据与集合都读不到。</p>
 </div>
 
 <div class="card">
+  <h1 style="font-size:16px;">读取你的血糖数据（只返回你自己设备的记录）</h1>
+<pre>curl "<?= htmlspecialchars($nsUrl) ?>/api/v1/entries.json?count=100" \
+  -H "api-secret: &lt;你的token&gt;"</pre>
+  <p class="hint">该接口的作用域是设备名 <?= htmlspecialchars($user['username']) ?>：用 <code>find[device]</code> 指定别的设备会返回空数组，按 id 读他人记录会被拒绝（401）。实时属性接口（/api/v2/properties 等）仍需要完整读权限，你的 token 在这些入口会收到 401。</p>
+
   <h1 style="font-size:16px;">读取你的 Profile（只返回你自己的档案）</h1>
 <pre>curl <?= htmlspecialchars($nsUrl) ?>/api/v1/profile.json \
   -H "api-secret: &lt;你的token&gt;"</pre>

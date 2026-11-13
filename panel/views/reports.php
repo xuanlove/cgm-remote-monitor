@@ -16,6 +16,12 @@ $hasData = ($stats['count'] ?? 0) > 0;
     <?php endforeach; ?>
     <span class="hint">共 <?= (int)$stats['count'] ?> 条读数<?php if ($stats['coverage'] !== null): ?> · 数据覆盖 <?= $stats['coverage'] ?>%<?php endif; ?></span>
   </form>
+  <div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap;">
+    <span class="hint">导出当前区间：</span>
+    <a href="/export/entries.csv?days=<?= $days ?>" class="hint">血糖 CSV</a>
+    <a href="/export/entries.json?days=<?= $days ?>" class="hint">血糖 JSON</a>
+    <a href="/export/treatments.csv?days=<?= $days ?>" class="hint">治疗 CSV</a>
+  </div>
 </div>
 
 <?php if (!$hasData): ?>
