@@ -4,11 +4,13 @@ declare(strict_types=1);
 require __DIR__ . '/lib/Db.php';
 require __DIR__ . '/lib/Auth.php';
 require __DIR__ . '/lib/NsClient.php';
+require __DIR__ . '/lib/TreatmentTypes.php';
 
 use NightPanel\Auth;
 use NightPanel\Db;
 use NightPanel\NsClient;
 use NightPanel\NsException;
+use NightPanel\TreatmentTypes;
 
 Auth::boot();
 Auth::bootstrapAdmin();
@@ -154,6 +156,46 @@ function defaultProfileTemplate(): array
         'basal' => [[0, 1]],
         'timezone' => 'Asia/Chongqing',
     ];
+}
+
+/**
+ * A record belongs to the session user only when the stored attribution says
+ * so. Both fields are written by the server, so a client cannot claim them.
+ */
+function self_owned(array $record, array $user): bool
+{
+    return isset($record['enteredBy']) && (string)$record['enteredBy'] === (string)$user['username'];
+}
+
+/**
+ * The session user's treatment plans (profile records). Nightscout sorts
+ * profile records by startDate descending, so the first record is the one
+ * currently in effect.
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function collect_plans(string $username): array
+{
+    $plans = [];
+    foreach (nsClient()->profiles() as $index => $record) {
+        if (!isset($record['store'][$username])) {
+            continue;
+        }
+        $own = $record['store'][$username];
+        $targetLow = $own['target_low'] ?? [];
+        $targetHigh = $own['target_high'] ?? [];
+        $plans[] = [
+            'id' => (string)$record['_id'],
+            'startDate' => (string)($record['startDate'] ?? ''),
+            'active' => $index === 0,
+            'shared' => count(array_keys($record['store'])) > 1,
+            'dia' => $own['dia'] ?? null,
+            'basalCount' => count($own['basal'] ?? []),
+            'targetLow' => $targetLow ? $targetLow[count($targetLow) - 1][1] : null,
+            'targetHigh' => $targetHigh ? $targetHigh[count($targetHigh) - 1][1] : null,
+        ];
+    }
+    return $plans;
 }
 
 /* ------------------------------------------------------------------ routes */
@@ -352,7 +394,14 @@ try {
 
         case $path === '/entry' && $method === 'GET':
             $user = Auth::requireUser();
-            view('entry', ['user' => $user, 'error' => null, 'success' => null]);
+            view('entry', [
+                'user' => $user,
+                'types' => TreatmentTypes::types(),
+                'fields' => TreatmentTypes::fields(),
+                'error' => null,
+                'success' => null,
+                'preset' => (string)($_GET['type'] ?? ''),
+            ]);
             break;
 
         case $path === '/entry' && $method === 'POST':
@@ -368,14 +417,14 @@ try {
                         $client->createEntry($user['username'], $sgv, ($_POST['timestamp'] ?? '') ?: null);
                         break;
                     case 'treatment':
-                        $client->createTreatment([
-                            'eventType' => trim((string)($_POST['eventType'] ?? 'Note')),
-                            'glucose' => (($_POST['glucose'] ?? '') !== '') ? (float)$_POST['glucose'] : null,
-                            'glucoseType' => (($_POST['glucose'] ?? '') !== '') ? 'Finger' : null,
-                            'carbs' => (($_POST['carbs'] ?? '') !== '') ? (float)$_POST['carbs'] : null,
-                            'insulin' => (($_POST['insulin'] ?? '') !== '') ? (float)$_POST['insulin'] : null,
-                            'notes' => trim((string)($_POST['notes'] ?? '')),
-                        ], $user['username']);
+                        // Every event type goes through the registry, so only the
+                        // fields that belong to the chosen type are written.
+                        $eventType = (string)($_POST['eventType'] ?? '');
+                        if (!TreatmentTypes::has($eventType)) {
+                            throw new \InvalidArgumentException('不支持的事件类型');
+                        }
+                        $record = TreatmentTypes::build($eventType, $_POST);
+                        $client->createTreatment($record, $user['username']);
                         break;
                     case 'activity':
                         $client->createActivity([
@@ -387,12 +436,211 @@ try {
                     default:
                         throw new \InvalidArgumentException('未知的数据类型');
                 }
-                view('entry', ['user' => $user, 'error' => null, 'success' => '数据已提交']);
+                view('entry', [
+                    'user' => $user,
+                    'types' => TreatmentTypes::types(),
+                    'fields' => TreatmentTypes::fields(),
+                    'error' => null,
+                    'success' => '数据已提交',
+                    'preset' => '',
+                ]);
             } catch (\InvalidArgumentException $e) {
-                view('entry', ['user' => $user, 'error' => $e->getMessage(), 'success' => null]);
+                view('entry', [
+                    'user' => $user,
+                    'types' => TreatmentTypes::types(),
+                    'fields' => TreatmentTypes::fields(),
+                    'error' => $e->getMessage(),
+                    'success' => null,
+                    'preset' => (string)($_POST['eventType'] ?? ''),
+                ]);
             } catch (NsException $e) {
-                view('entry', ['user' => $user, 'error' => '提交失败：' . $e->getMessage(), 'success' => null]);
+                view('entry', [
+                    'user' => $user,
+                    'types' => TreatmentTypes::types(),
+                    'fields' => TreatmentTypes::fields(),
+                    'error' => '提交失败：' . $e->getMessage(),
+                    'success' => null,
+                    'preset' => (string)($_POST['eventType'] ?? ''),
+                ]);
             }
+            break;
+
+        /* ---------------------------------------------------- B3 记录编辑/删除 */
+
+        case $path === '/treatments' && $method === 'GET':
+            $user = Auth::requireUser();
+            $client = nsClient();
+            $editing = null;
+            $editId = (string)($_GET['edit'] ?? '');
+            if ($editId !== '') {
+                $existing = $client->treatmentById($editId);
+                // Ownership is decided here, never by what the request claims.
+                if ($existing !== null && self_owned($existing, $user)) {
+                    $editing = $existing;
+                }
+            }
+            view('treatments', [
+                'user' => $user,
+                'types' => TreatmentTypes::types(),
+                'fields' => TreatmentTypes::fields(),
+                'treatments' => $client->treatmentsByUser($user['username'], 100),
+                'editing' => $editing,
+                'error' => null,
+                'success' => null,
+            ]);
+            break;
+
+        case $path === '/treatments/save' && $method === 'POST':
+            $user = Auth::requireUser();
+            Auth::assertCsrf($_POST['csrf'] ?? null);
+            $client = nsClient();
+            $id = (string)($_POST['_id'] ?? '');
+            $existing = $id !== '' ? $client->treatmentById($id) : null;
+            if ($existing === null || !self_owned($existing, $user)) {
+                http_response_code(403);
+                view('treatments', [
+                    'user' => $user,
+                    'types' => TreatmentTypes::types(),
+                    'fields' => TreatmentTypes::fields(),
+                    'treatments' => $client->treatmentsByUser($user['username'], 100),
+                    'editing' => null,
+                    'error' => '无权修改该记录',
+                    'success' => null,
+                ]);
+                break;
+            }
+            try {
+                $eventType = (string)($_POST['eventType'] ?? $existing['eventType'] ?? 'Note');
+                if (!TreatmentTypes::has($eventType)) {
+                    throw new \InvalidArgumentException('不支持的事件类型');
+                }
+                $updated = TreatmentTypes::build($eventType, $_POST);
+                // Identity and attribution are carried from the stored record,
+                // so an edit can never hand a record to another user.
+                $updated['_id'] = (string)$existing['_id'];
+                $updated['enteredBy'] = (string)$existing['enteredBy'];
+                $updated['created_at'] = (string)($existing['created_at'] ?? gmdate('c'));
+                $client->updateTreatment($updated);
+                header('Location: /treatments');
+                exit;
+            } catch (\InvalidArgumentException $e) {
+                view('treatments', [
+                    'user' => $user,
+                    'types' => TreatmentTypes::types(),
+                    'fields' => TreatmentTypes::fields(),
+                    'treatments' => $client->treatmentsByUser($user['username'], 100),
+                    'editing' => $existing,
+                    'error' => '保存失败：' . $e->getMessage(),
+                    'success' => null,
+                ]);
+            } catch (NsException $e) {
+                view('treatments', [
+                    'user' => $user,
+                    'types' => TreatmentTypes::types(),
+                    'fields' => TreatmentTypes::fields(),
+                    'treatments' => $client->treatmentsByUser($user['username'], 100),
+                    'editing' => $existing,
+                    'error' => '保存失败：' . $e->getMessage(),
+                    'success' => null,
+                ]);
+            }
+            break;
+
+        case $path === '/treatments/delete' && $method === 'POST':
+            $user = Auth::requireUser();
+            Auth::assertCsrf($_POST['csrf'] ?? null);
+            $client = nsClient();
+            $id = (string)($_POST['_id'] ?? '');
+            $existing = $id !== '' ? $client->treatmentById($id) : null;
+            if ($existing !== null && self_owned($existing, $user)) {
+                $client->deleteTreatment($id);
+            }
+            header('Location: /treatments');
+            exit;
+
+        /* ------------------------------------------------ B2 治疗方案（版本）*/
+
+        case $path === '/profile/plans' && $method === 'GET':
+            $user = Auth::requireUser();
+            view('plans', [
+                'user' => $user,
+                'plans' => collect_plans($user['username']),
+                'error' => null,
+                'success' => null,
+            ]);
+            break;
+
+        case $path === '/profile/plans/activate' && $method === 'POST':
+            $user = Auth::requireUser();
+            Auth::assertCsrf($_POST['csrf'] ?? null);
+            $planId = (string)($_POST['_id'] ?? '');
+            $error = null;
+            try {
+                $records = nsClient()->profiles();
+                $source = null;
+                foreach ($records as $record) {
+                    if ((string)$record['_id'] === $planId) { $source = $record; break; }
+                }
+                if ($source === null || !isset($source['store'][$user['username']])) {
+                    throw new \InvalidArgumentException('方案不存在');
+                }
+
+                // The new record has to carry every other user's store entry as
+                // well: Nightscout reads the current profile from the newest
+                // record, so a record holding only this user would make everyone
+                // else's profile disappear. Only this user's own entry is
+                // replaced, and only with a value taken from a record they can
+                // already read.
+                $active = $records[0] ?? [];
+                $store = is_array($active['store'] ?? null) ? $active['store'] : [];
+                $store[$user['username']] = $source['store'][$user['username']];
+
+                nsClient()->requestOrThrow('POST', '/api/v1/profile.json', [
+                    'store' => $store,
+                    'defaultProfile' => $active['defaultProfile'] ?? $user['username'],
+                    'startDate' => gmdate('c'),
+                ]);
+            } catch (\InvalidArgumentException $e) {
+                $error = $e->getMessage();
+            } catch (NsException $e) {
+                $error = '启用失败：' . $e->getMessage();
+            }
+            if ($error === null) { header('Location: /profile/plans'); exit; }
+            view('plans', ['user' => $user, 'plans' => collect_plans($user['username']), 'error' => $error, 'success' => null]);
+            break;
+
+        case $path === '/profile/plans/delete' && $method === 'POST':
+            $user = Auth::requireUser();
+            Auth::assertCsrf($_POST['csrf'] ?? null);
+            $planId = (string)($_POST['_id'] ?? '');
+            $error = null;
+            try {
+                $records = nsClient()->profiles();
+                $target = null;
+                $index = -1;
+                foreach ($records as $i => $record) {
+                    if ((string)$record['_id'] === $planId) { $target = $record; $index = $i; break; }
+                }
+                if ($target === null) {
+                    throw new \InvalidArgumentException('方案不存在');
+                }
+                // A shared record holds other users' entries too: deleting it
+                // would destroy their plans, so only single-owner records go.
+                $keys = array_keys($target['store'] ?? []);
+                if ($keys !== [$user['username']]) {
+                    throw new \InvalidArgumentException('该方案记录包含其他用户的数据，不能删除');
+                }
+                if ($index === 0) {
+                    throw new \InvalidArgumentException('当前生效的方案不能删除');
+                }
+                nsClient()->requestOrThrow('DELETE', '/api/v1/profile/' . rawurlencode($planId));
+            } catch (\InvalidArgumentException $e) {
+                $error = $e->getMessage();
+            } catch (NsException $e) {
+                $error = '删除失败：' . $e->getMessage();
+            }
+            if ($error === null) { header('Location: /profile/plans'); exit; }
+            view('plans', ['user' => $user, 'plans' => collect_plans($user['username']), 'error' => $error, 'success' => null]);
             break;
 
         case $path === '/myapi' && $method === 'GET':

@@ -47,7 +47,9 @@
   <?php if ($user !== null): ?>
     <a href="/dashboard">仪表盘</a>
     <a href="/profile">我的 Profile</a>
+    <a href="/profile/plans">治疗方案</a>
     <a href="/entry">填写数据</a>
+    <a href="/treatments">我的记录</a>
     <a href="/myapi">我的 API</a>
     <?php if (($user['role'] ?? '') === 'admin'): ?><a href="/admin/users">管理</a><?php endif; ?>
     <span class="right"><?= htmlspecialchars((string)($user['username'] ?? '')) ?> · <a href="/logout">退出</a></span>

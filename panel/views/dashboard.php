@@ -32,7 +32,7 @@
 <div class="card">
   <h1 style="font-size:16px;">我的治疗记录（最近 100 条）</h1>
   <table id="treatments">
-    <thead><tr><th>时间</th><th>类型</th><th>血糖</th><th>碳水</th><th>胰岛素</th><th>备注</th></tr></thead>
+    <thead><tr><th>时间</th><th>类型</th><th>血糖</th><th>碳水</th><th>胰岛素</th><th>备注</th><th></th></tr></thead>
     <tbody></tbody>
   </table>
 </div>
@@ -158,7 +158,8 @@ async function loadAll() {
       + '<td>' + (t.glucose ?? '-') + '</td>'
       + '<td>' + (t.carbs ?? '-') + '</td>'
       + '<td>' + (t.insulin ?? '-') + '</td>'
-      + '<td>' + (t.notes || '') + '</td>';
+      + '<td>' + (t.notes || '') + '</td>'
+      + '<td><a href="/treatments?edit=' + encodeURIComponent(t._id) + '">编辑</a></td>';
     tbody.appendChild(row);
   });
 }

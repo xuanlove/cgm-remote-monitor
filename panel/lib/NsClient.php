@@ -184,8 +184,12 @@ final class NsClient
     /** Treatments entered by one user. */
     public function treatmentsByUser(string $enteredBy, int $count = 100): array
     {
-        $path = '/api/v1/treatments.json?count=' . $count
-            . '&find[enteredBy]=' . rawurlencode($enteredBy);
+        return $this->treatmentQuery('&find[enteredBy]=' . rawurlencode($enteredBy), $count);
+    }
+
+    private function treatmentQuery(string $filter, int $count): array
+    {
+        $path = '/api/v1/treatments.json?count=' . $count . $filter;
         $body = $this->requestOrThrow('GET', $path);
         return is_array($body) ? $body : [];
     }
@@ -196,6 +200,24 @@ final class NsClient
         $record['enteredBy'] = $enteredBy;
         $record['created_at'] = gmdate('c');
         return $this->requestOrThrow('POST', '/api/v1/treatments.json', $record);
+    }
+
+    /** One treatment by its id, or null when it does not exist. */
+    public function treatmentById(string $id): ?array
+    {
+        $records = $this->treatmentQuery('&find[_id]=' . rawurlencode($id), 1);
+        return $records[0] ?? null;
+    }
+
+    /** Update a treatment document (whole-record PUT, as Nightscout expects). */
+    public function updateTreatment(array $record): array
+    {
+        return $this->requestOrThrow('PUT', '/api/v1/treatments.json', $record);
+    }
+
+    public function deleteTreatment(string $id): void
+    {
+        $this->requestOrThrow('DELETE', '/api/v1/treatments/' . rawurlencode($id), null, null, [200, 204]);
     }
 
     /** Write an activity record, forcing the attribution fields. */
