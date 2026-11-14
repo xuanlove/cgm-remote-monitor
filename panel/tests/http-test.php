@@ -28,6 +28,7 @@ $cases = [
     'login renders the form' => ['GET', '/login', [], 200, 'name="csrf"', ''],
     'dashboard needs a session' => ['GET', '/dashboard', [], 302, '', '/login'],
     'logout is POST only' => ['GET', '/logout', [], 405, '', ''],
+    'logout without CSRF is refused' => ['POST', '/logout', [], 403, '', ''],
     'login without CSRF is refused' => ['POST', '/login', ['username' => 'x', 'password' => 'y'], 403, '', ''],
     'unknown path renders the 404 page' => ['GET', '/nope', [], 404, '404', ''],
     'trailing slash redirects' => ['GET', '/login/', [], 301, '', ''],

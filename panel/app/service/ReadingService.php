@@ -42,24 +42,15 @@ final class ReadingService
      * Bounds of a historical day in the user's own timezone.
      *
      * A UTC host would otherwise shift the window by the offset, so a user in
-     * Asia/Chongqing asking for 2026-11-14 would see the wrong day.
+     * Asia/Chongqing asking for 2026-11-14 would see the wrong day. The zone
+     * comes from the user's profile store entry via ProfileService::timezone.
      *
+     * @param array<string,mixed> $user
      * @return array{0:int,1:int}
      */
-    public static function dayWindow(string $date, string $username, int $backendId): array
+    public static function dayWindow(string $date, array $user): array
     {
-        $tz = new \DateTimeZone('UTC');
-        try {
-            $record = Mirror::profileRecord($backendId);
-            $zone = (string)($record['store'][$username]['timezone'] ?? '');
-            if ($zone !== '') {
-                $tz = new \DateTimeZone($zone);
-            }
-        } catch (\Throwable $e) {
-            // Unknown timezone in the profile: fall back to UTC.
-        }
-
-        $start = new \DateTimeImmutable($date . ' 00:00:00', $tz);
+        $start = new \DateTimeImmutable($date . ' 00:00:00', ProfileService::timezone($user));
         return [$start->getTimestamp() * 1000, $start->modify('+1 day')->getTimestamp() * 1000];
     }
 }

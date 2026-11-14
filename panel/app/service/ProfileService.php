@@ -80,6 +80,25 @@ final class ProfileService
         return $record['store'][$user['username']] ?? null;
     }
 
+    /**
+     * The user's profile timezone. The profile record lives on the mirror; an
+     * unknown zone, a missing store entry or a cold mirror falls back to UTC —
+     * the same rule dayWindow has always applied.
+     */
+    public static function timezone(array $user): \DateTimeZone
+    {
+        try {
+            $record = Mirror::profileRecord((int)($user['backend_id'] ?? 0));
+            $zone = (string)($record['store'][(string)$user['username']]['timezone'] ?? '');
+            if ($zone !== '') {
+                return new \DateTimeZone($zone);
+            }
+        } catch (\Throwable $e) {
+            // unknown zone or unusable mirror: fall back to UTC
+        }
+        return new \DateTimeZone('UTC');
+    }
+
     /** Latest value of a profile time-shifted array (mg/dL) as mmol/L. */
     public static function target(array $profile, string $field, float $fallback): float
     {

@@ -17,7 +17,9 @@ define('PANEL_DB_FILE', $dbFile);
 
 require __DIR__ . '/../vendor/autoload.php';
 
+use app\service\ProfileService;
 use app\service\ReadingService;
+use app\service\TreatmentService;
 use NightPanel\Db;
 use NightPanel\Mirror;
 
@@ -122,13 +124,38 @@ $pIns->execute($profile('p2', '2026-06-01T00:00:00.000Z'));
 check('profileRecord picks the newest record', Mirror::profileRecord(1)['_id'] === 'p2');
 check('profileRecord is backend scoped', Mirror::profileRecord(2) === null);
 
+// Timezone resolution: the profile store entry is the panel's single source
+// for every wall-clock interpretation (historical days, hand-entered
+// readings, treatment lists).
+$tz = ProfileService::timezone(['username' => 'alice', 'backend_id' => 1]);
+check('profile timezone resolves from the mirror', $tz->getName() === 'Asia/Shanghai');
+check('unknown profile falls back to UTC', ProfileService::timezone(['username' => 'nobody', 'backend_id' => 1])->getName() === 'UTC');
+check('missing backend falls back to UTC', ProfileService::timezone(['username' => 'alice', 'backend_id' => 0])->getName() === 'UTC');
+
 // dayWindow must resolve the user's profile timezone (UTC+8), not the host
 // clock: a regression here silently replayed historical days in UTC.
-[$dayStartMs, $dayEndMs] = ReadingService::dayWindow('2026-11-14', 'alice', 1);
+[$dayStartMs, $dayEndMs] = ReadingService::dayWindow('2026-11-14', ['username' => 'alice', 'backend_id' => 1]);
 check('dayWindow honours the profile timezone', gmdate('Y-m-d H:i', (int)($dayStartMs / 1000)) === '2026-11-13 16:00');
 check('dayWindow covers exactly one local day', gmdate('Y-m-d H:i', (int)($dayEndMs / 1000)) === '2026-11-14 16:00');
-[$utcStartMs, ] = ReadingService::dayWindow('2026-11-14', 'nobody', 1);
+[$utcStartMs, ] = ReadingService::dayWindow('2026-11-14', ['username' => 'nobody', 'backend_id' => 1]);
 check('dayWindow falls back to UTC without a profile', gmdate('Y-m-d H:i', (int)($utcStartMs / 1000)) === '2026-11-14 00:00');
+
+// Hand-entered glucose times are interpreted in the profile timezone and
+// re-emitted with an explicit offset instead of the server clock's zone.
+$norm = new \ReflectionMethod(TreatmentService::class, 'withProfileOffset');
+$norm->setAccessible(true);
+$sh = new \DateTimeZone('Asia/Shanghai');
+check('local timestamp gains the profile offset', $norm->invoke(null, '2026-11-14 10:00', $sh) === '2026-11-14T10:00:00+08:00');
+check('explicit offset input is kept', $norm->invoke(null, '2026-11-14T10:00:00+05:00', $sh) === '2026-11-14T10:00:00+05:00');
+check('garbage input passes through for the client to reject', $norm->invoke(null, 'not-a-date', $sh) === 'not-a-date');
+
+// The treatments list renders in the profile timezone, matching the
+// dashboard's browser-local rendering of the same records.
+$rows = TreatmentService::displayRows(
+    [['_id' => 't3', 'created_at' => '2026-11-14T02:00:00+00:00', 'eventType' => 'Note']],
+    new \DateTimeZone('Asia/Shanghai')
+);
+check('displayRows renders in the profile timezone', $rows[0]['time'] === '2026-11-14 10:00');
 
 $pdo->prepare(
     'INSERT INTO panel_sync_state (user_id, stream, cursor_ms, last_ok_at) VALUES (1, "entries:sgv", ?, ?)'

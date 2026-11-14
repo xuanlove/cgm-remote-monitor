@@ -85,10 +85,18 @@ final class TreatmentService
                 if ($sgv < 10 || $sgv > 600) {
                     throw new \InvalidArgumentException(Lang::t('val.glucoseRange'));
                 }
+                // The form sends a zoneless datetime-local value: interpret it
+                // in the user's profile timezone and re-emit it with an
+                // explicit offset, so the reading lands on the intended
+                // wall-clock time no matter which zone the PHP host runs in.
+                $timestamp = ($post['timestamp'] ?? '') ?: null;
+                if ($timestamp !== null) {
+                    $timestamp = self::withProfileOffset($timestamp, ProfileService::timezone($user));
+                }
                 $created = self::created($client->createEntry(
                     (string)$user['username'],
                     $sgv,
-                    ($post['timestamp'] ?? '') ?: null
+                    $timestamp
                 ));
                 if ($created !== null) {
                     Mirror::storeEntry((int)$user['id'], $created, (string)$user['username']);
@@ -205,17 +213,22 @@ final class TreatmentService
      * Render the treatment list as display rows.
      *
      * Shaping happens here so the template only prints already-prepared text
-     * (and the default escaping applies to every cell).
+     * (and the default escaping applies to every cell). Times render in the
+     * viewer's profile timezone — the dashboard's JavaScript shows the
+     * browser-local time of the same records, so both agree for a user whose
+     * profile zone matches their device instead of drifting by the host's UTC
+     * offset.
      *
      * @param array<int,array<string,mixed>> $treatments
      * @return array<int,array<string,mixed>>
      */
-    public static function displayRows(array $treatments): array
+    public static function displayRows(array $treatments, ?\DateTimeZone $tz = null): array
     {
+        $tz ??= new \DateTimeZone('UTC');
         $rows = [];
         foreach ($treatments as $t) {
             $rows[] = [
-                'time' => date('Y-m-d H:i', strtotime((string)($t['created_at'] ?? 'now'))),
+                'time' => self::displayTime((string)($t['created_at'] ?? 'now'), $tz),
                 'type' => (string)($t['eventType'] ?? '-'),
                 'glucose' => (string)($t['glucose'] ?? '-'),
                 'carbs' => (string)($t['carbs'] ?? '-'),
@@ -227,6 +240,33 @@ final class TreatmentService
             ];
         }
         return $rows;
+    }
+
+    /** Render a Nightscout ISO timestamp in the viewer's profile timezone. */
+    private static function displayTime(string $createdAt, \DateTimeZone $tz): string
+    {
+        $ts = strtotime($createdAt);
+        if ($ts === false) {
+            $ts = time();
+        }
+        return (new \DateTimeImmutable('@' . $ts))->setTimezone($tz)->format('Y-m-d H:i');
+    }
+
+    /**
+     * Re-emit a zoneless local timestamp with an explicit offset
+     * ("2026-11-14 10:00" in Asia/Shanghai -> "2026-11-14T10:00:00+08:00"),
+     * so both Nightscout and strtotime() downstream resolve the instant
+     * without guessing a zone. An input that already carries an offset keeps
+     * it; unparsable input passes through unchanged so NsClient keeps
+     * rejecting it with its own clear error.
+     */
+    private static function withProfileOffset(string $input, \DateTimeZone $tz): string
+    {
+        try {
+            return (new \DateTimeImmutable($input, $tz))->format('c');
+        } catch (\Throwable $e) {
+            return $input;
+        }
     }
 
     /** The "extra" column: duration, temp basal, percent and temp targets. */

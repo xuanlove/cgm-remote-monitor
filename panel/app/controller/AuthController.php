@@ -35,7 +35,8 @@ class AuthController extends BaseController
 
     /**
      * Logout is POST + CSRF: a bare GET from another site must not be able to
-     * sign the user out. Any other method answers 405 with an Allow header.
+     * sign the user out, and a token-less POST is refused 403 by the guard.
+     * Any other method answers 405 with an Allow header.
      */
     public function logout(Request $request): Response
     {

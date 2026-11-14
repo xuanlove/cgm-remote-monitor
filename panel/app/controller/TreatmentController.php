@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace app\controller;
 
 use app\service\PanelContext;
+use app\service\ProfileService;
 use app\service\TreatmentService;
 use NightPanel\Mirror;
 use NightPanel\NsException;
@@ -83,7 +84,10 @@ class TreatmentController extends BaseController
             'typesJson' => TreatmentService::typesJson(),
             'fieldsJson' => TreatmentService::fieldsJson(),
             'recordJson' => js_json($editing ?? new \stdClass()),
-            'rows' => TreatmentService::displayRows(Mirror::recentTreatments((int)$user['id'], 100)),
+            'rows' => TreatmentService::displayRows(
+                Mirror::recentTreatments((int)$user['id'], 100),
+                ProfileService::timezone($user)
+            ),
             'editing' => $editing,
             'error' => $error,
             'success' => $success,

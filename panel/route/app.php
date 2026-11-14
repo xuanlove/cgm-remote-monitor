@@ -26,8 +26,10 @@ Route::post('register', 'Auth/register')
     ->middleware(CsrfGuard::class)
     ->middleware(Throttle::class, 'register', 10, 3600);
 
-// Any method so the controller can answer 405 + Allow: POST itself.
-Route::any('logout', 'Auth/logout');
+// Any method so the controller can answer 405 + Allow: POST itself. The CSRF
+// guard skips the GET probe and rejects token-less POSTs, so a cross-site
+// form cannot sign the user out either.
+Route::any('logout', 'Auth/logout')->middleware(CsrfGuard::class);
 Route::post('lang', 'Lang/switchLang')->middleware(CsrfGuard::class);
 
 Route::group(function () {

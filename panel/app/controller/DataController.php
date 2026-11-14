@@ -27,7 +27,7 @@ class DataController extends BaseController
         // window is "today" (the client narrows it to its hour span).
         $date = (string)$request->get('date', '');
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1) {
-            [$startMs, $endMs] = ReadingService::dayWindow($date, (string)$user['username'], (int)$user['backend_id']);
+            [$startMs, $endMs] = ReadingService::dayWindow($date, $user);
         } else {
             [$startMs, $endMs] = ReadingService::liveWindow();
         }
