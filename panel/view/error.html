@@ -1,0 +1,8 @@
+{extend name="layout/base" /}
+{block name="content"}
+<div class="card" style="max-width:640px;margin:60px auto;">
+  <h1>{:t('err.title')}</h1>
+  <p class="msg-bad">{$message}</p>
+  <p><a href="/dashboard">{:t('err.back')}</a></p>
+</div>
+{/block}

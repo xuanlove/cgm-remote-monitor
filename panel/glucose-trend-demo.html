@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>血糖趋势 · ECharts</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+  :root { --bg:#1a1f2b; --card:#232a38; --line:#313a4d; --fg:#e6ebf4; --muted:#8b95a9; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:14px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+  main { max-width:1100px; margin:24px auto; padding:0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; }
+  #chart { width:100%; height:420px; }
+  .hint { color:var(--muted); font-size:12px; margin-top:8px; }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <div id="chart"></div>
+    <p class="hint">参考线：3.9 mmol/L（目标下限）· 6.1 mmol/L（目标上限）。拖动缩放或使用下方滑块查看细节，悬停查看数值与状态。</p>
+  </div>
+</main>
+
+<script>
+/* ================================================================
+ * 1. 数据结构：[{ "time": "YYYY-MM-DD HH:mm", "value": mmol/L }, ...]
+ *    value 为该时间点的血糖值，单位 mmol/L
+ * ================================================================ */
+const GLUCOSE_DATA = [
+  { time: '2025-01-01 06:30', value: 5.2 },
+  { time: '2025-01-01 07:00', value: 5.6 },
+  { time: '2025-01-01 08:00', value: 8.4 },
+  { time: '2025-01-01 09:00', value: 9.1 },
+  { time: '2025-01-01 10:00', value: 7.2 },
+  { time: '2025-01-01 11:00', value: 5.8 },
+  { time: '2025-01-01 12:00', value: 6.0 },
+  { time: '2025-01-01 12:30', value: 10.3 },
+  { time: '2025-01-01 13:30', value: 11.2 },
+  { time: '2025-01-01 15:00', value: 7.9 },
+  { time: '2025-01-01 17:00', value: 4.6 },
+  { time: '2025-01-01 19:00', value: 5.4 },
+  { time: '2025-01-01 21:00', value: 6.3 },
+  { time: '2025-01-01 22:30', value: 5.1 }
+];
+
+/* 参考范围（mmol/L，空腹血糖） */
+const TARGET_LOW  = 3.9;
+const TARGET_HIGH = 6.1;
+
+/* ================================================================
+ * 2. 数据加工：时间轴 + 按血糖区间着色的散点层
+ * ================================================================ */
+function statusOf (v) {
+  if (v < TARGET_LOW)  return { label: '偏低', color: '#e05a5a' };
+  if (v > 10)          return { label: '急高', color: '#e05a5a' };
+  if (v > TARGET_HIGH) return { label: '偏高', color: '#e0a05a' };
+  return               { label: '正常', color: '#3fb27f' };
+}
+
+const xData = GLUCOSE_DATA.map(d => d.time);
+const yData = GLUCOSE_DATA.map(d => d.value);
+const pointColors = yData.map(v => statusOf(v).color);
+
+const chart = echarts.init(document.getElementById('chart'));
+window.addEventListener('resize', () => chart.resize());
+
+const option = {
+  backgroundColor: 'transparent',
+  title: {
+    text: '血糖趋势',
+    subtext: '单位：mmol/L · 参考范围 3.9 ~ 6.1（空腹）',
+    left: 12, top: 8,
+    textStyle: { color: '#e6ebf4', fontSize: 16 },
+    subtextStyle: { color: '#8b95a9', fontSize: 12 }
+  },
+  toolbox: {
+    right: 16, top: 8,
+    feature: { saveAsImage: { title: '保存图片', name: 'glucose-trend' } },
+    iconStyle: { borderColor: '#8b95a9' }
+  },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: { type: 'line', lineStyle: { color: '#8b95a9', type: 'dashed' } },
+    formatter: params => {
+      const p = params[0];
+      const idx = p.dataIndex;
+      const st = statusOf(yData[idx]);
+      return '<b>' + p.axisValue + '</b><br/>血糖：<b style="color:' + st.color + '">'
+        + yData[idx].toFixed(1) + ' mmol/L</b>（' + st.label + '）';
+    }
+  },
+  legend: {
+    top: 10, left: 'center',
+    data: ['血糖值'],
+    textStyle: { color: '#e6ebf4' }
+  },
+  grid: { left: 56, right: 24, top: 72, bottom: 76, containLabel: false },
+  xAxis: {
+    type: 'category',
+    data: xData,
+    name: '时间',
+    nameTextStyle: { color: '#8b95a9' },
+    axisLine: { lineStyle: { color: '#313a4d' } },
+    axisTick: { show: false },
+    axisLabel: {
+      color: '#8b95a9',
+      formatter: v => v.slice(11)   // 只显示 HH:mm
+    }
+  },
+  yAxis: {
+    type: 'value',
+    name: 'mmol/L',
+    nameTextStyle: { color: '#8b95a9', padding: [0, 0, 6, 0] },
+    min: 0,
+    max: 15,
+    interval: 3,
+    axisLine: { show: false },
+    axisLabel: { color: '#8b95a9' },
+    splitLine: { lineStyle: { color: '#313a4d', opacity: .45 } }
+  },
+  dataZoom: [
+    { type: 'inside', start: 0, end: 100 },
+    { type: 'slider', height: 22, bottom: 12, borderColor: '#313a4d' }
+  ],
+  series: [
+    {
+      name: '血糖值',
+      type: 'line',
+      data: yData,
+      lineStyle: { color: '#4f8ef7', width: 2.5 },
+      showSymbol: true,
+      symbol: 'circle',
+      symbolSize: 8,
+      itemStyle: { color: p => pointColors[p.dataIndex], borderColor: '#232a38', borderWidth: 1 },
+      emphasis: { scale: 1.6, itemStyle: { shadowBlur: 10, shadowColor: 'rgba(79,142,247,.6)' } },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: 'rgba(79,142,247,.30)' },
+          { offset: 1, color: 'rgba(79,142,247,0)' }
+        ])
+      },
+      markArea: {
+        silent: true,
+        itemStyle: { color: 'rgba(63,178,127,.12)' },
+        label: { show: true, position: 'insideTopRight', color: '#3fb27f', fontSize: 11 },
+        data: [[{ name: '目标区间', yAxis: TARGET_LOW }, { yAxis: TARGET_HIGH }]]
+      },
+      markLine: {
+        silent: true,
+        symbol: 'none',
+        lineStyle: { type: 'dashed' },
+        label: { formatter: '{b}', fontSize: 11 },
+        data: [
+          { yAxis: TARGET_LOW,  name: '3.9', lineStyle: { color: '#e05a5a' }, label: { color: '#e05a5a', position: 'insideStartTop' } },
+          { yAxis: TARGET_HIGH, name: '6.1', lineStyle: { color: '#e0a05a' }, label: { color: '#e0a05a', position: 'insideStartBottom' } }
+        ]
+      }
+    }
+  ]
+};
+
+chart.setOption(option);
+</script>
+</body>
+</html>

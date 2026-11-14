@@ -1,0 +1,119 @@
+{extend name="layout/base" /}
+{block name="content"}
+<h1>{:t('tr.title')} <span class="hint" style="font-size:13px;">· {:t_html('tr.owner', ['name' => $user['username']])}</span></h1>
+
+{notempty name="error"}<p class="msg-bad">{$error}</p>{/notempty}
+{notempty name="success"}<p class="msg-ok">{$success}</p>{/notempty}
+
+{notempty name="editing"}
+<div class="card">
+  <h1 style="font-size:16px;">{:t('tr.editTitle')} <span class="hint">#{$editing['_id']}</span></h1>
+  <form method="post" action="/treatments/save" id="editForm">
+    <input type="hidden" name="csrf" value="{$csrf}">
+    <input type="hidden" name="_id" value="{$editing['_id']}">
+    <label>{:t('entry.eventType')}</label>
+    <select name="eventType" id="editEventType"></select>
+    <div id="editFields" class="grid"></div>
+    <button>{:t('tr.save')}</button>
+    <a href="/treatments" style="margin-left:12px;">{:t('tr.cancel')}</a>
+    <span class="hint">{:t('tr.saveHint')}</span>
+  </form>
+</div>
+{/notempty}
+
+<div class="card">
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+    <span class="hint">{:t('tr.export')}</span>
+    <a href="/export/treatments.csv?days=14" class="hint">{:t('tr.exportTreatments14')}</a>
+    <a href="/export/treatments.csv?days=30" class="hint">{:t('tr.exportTreatments30')}</a>
+    <a href="/export/entries.csv?days=14" class="hint">{:t('tr.exportGlucose14')}</a>
+  </div>
+  <table>
+    <thead><tr>
+      <th>{:t('col.time')}</th>
+      <th>{:t('col.type')}</th>
+      <th>{:t('col.glucose')}</th>
+      <th>{:t('col.carbs')}</th>
+      <th>{:t('col.insulin')}</th>
+      <th>{:t('col.extra')}</th>
+      <th>{:t('col.notes')}</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+    {if condition="empty($rows)"}
+      <tr><td colspan="8" class="hint">{:t('tr.empty')}</td></tr>
+    {else /}
+      {foreach $rows as $row}
+      <tr>
+        <td>{$row.time}</td>
+        <td>{$row.type}</td>
+        <td>{$row.glucose}</td>
+        <td>{$row.carbs}</td>
+        <td>{$row.insulin}</td>
+        <td class="hint">{$row.extra}</td>
+        <td>{$row.notes}</td>
+        <td style="white-space:nowrap;">
+          <a href="{$row.editUrl}">{:t('col.edit')}</a>
+          <form method="post" action="/treatments/delete" style="display:inline;" onsubmit="return confirm('{:t('tr.confirmDelete')}')">
+            <input type="hidden" name="csrf" value="{$csrf}">
+            <input type="hidden" name="_id" value="{$row.id}">
+            <button class="danger" style="margin:0 0 0 8px;padding:2px 8px;font-size:12px;">{:t('col.delete')}</button>
+          </form>
+        </td>
+      </tr>
+      {/foreach}
+    {/if}
+    </tbody>
+  </table>
+</div>
+
+{notempty name="editing"}
+<script>
+const TYPES = {$typesJson|raw};
+const FIELDS = {$fieldsJson|raw};
+const RECORD = {$recordJson|raw};
+</script>
+{literal}<script>
+const typeSelect = document.getElementById('editEventType');
+const container = document.getElementById('editFields');
+
+Object.keys(TYPES).forEach(name => {
+  const opt = document.createElement('option');
+  opt.value = name;
+  opt.textContent = TYPES[name].label + ' (' + name + ')';
+  if (name === RECORD.eventType) opt.selected = true;
+  typeSelect.appendChild(opt);
+});
+
+function renderFields () {
+  container.innerHTML = '';
+  (TYPES[typeSelect.value].fields || []).forEach(name => {
+    const def = FIELDS[name];
+    if (!def) return;
+    const wrap = document.createElement('div');
+    const label = document.createElement('label');
+    label.htmlFor = 'e_' + name;
+    label.textContent = def.label + (def.unit ? ' (' + def.unit + ')' : '');
+    wrap.appendChild(label);
+    const input = document.createElement('input');
+    input.id = 'e_' + name;
+    input.name = name;
+    if (def.kind === 'number') {
+      input.type = 'number';
+      input.step = def.step || '1';
+      if (def.min) input.min = def.min;
+      if (def.max) input.max = def.max;
+    } else {
+      input.type = 'text';
+    }
+    if (RECORD[name] !== undefined && RECORD[name] !== null) input.value = RECORD[name];
+    wrap.appendChild(input);
+    container.appendChild(wrap);
+  });
+}
+
+typeSelect.addEventListener('change', renderFields);
+renderFields();
+</script>{/literal}
+{/notempty}
+{/block}

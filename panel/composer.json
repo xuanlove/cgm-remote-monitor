@@ -1,0 +1,33 @@
+{
+    "name": "nightpanel/panel",
+    "description": "Nightscout multi-user panel (ThinkPHP 8)",
+    "type": "project",
+    "license": "AGPL-3.0-or-later",
+    "require": {
+        "php": ">=8.1",
+        "topthink/framework": "^8.0",
+        "topthink/think-view": "^2.0",
+        "topthink/think-orm": "^3.0"
+    },
+    "config": {
+        "platform": {
+            "php": "8.1.0"
+        },
+        "optimize-autoloader": true,
+        "allow-plugins": {}
+    },
+    "scripts": {
+        "post-autoload-dump": [
+            "@php think service:discover"
+        ]
+    },
+    "autoload": {
+        "psr-4": {
+            "app\\": "app/",
+            "NightPanel\\": "app/library/"
+        },
+        "files": [
+            "app/support/helpers.php"
+        ]
+    }
+}

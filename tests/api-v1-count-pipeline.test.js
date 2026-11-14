@@ -132,7 +132,14 @@ describe('API v1 count endpoint pipeline parameter', function ( ) {
     const app = express();
     const wares = require('../lib/middleware/')(env);
     const ctx = {
-      authorization: {isPermitted: function ( ) { return function (req, res, next) { next(); }; }}
+      authorization: {
+        isPermitted: function ( ) { return function (req, res, next) { next(); }; }
+        // The entries module asks for the scope-aware gate; this stub models a
+        // caller with full read access.
+        , entryAccessGate: function ( ) {
+          return function (req, res, next) { req.entryScope = { readAll: true, devices: [ ] }; next(); };
+        }
+      }
       , cache: {treatments: [ ], devicestatus: [ ], entries: [ ], getData: function ( ) { return [ ]; }}
       , ddata: {sgvs: [ ]}
       , purifier: {purifyObject: function ( ) { }}
@@ -165,7 +172,14 @@ describe('API v1 count endpoint pipeline parameter', function ( ) {
     const app = express();
     const wares = require('../lib/middleware/')(env);
     const ctx = {
-      authorization: {isPermitted: function ( ) { return function (req, res, next) { next(); }; }}
+      authorization: {
+        isPermitted: function ( ) { return function (req, res, next) { next(); }; }
+        // The entries module asks for the scope-aware gate; this stub models a
+        // caller with full read access.
+        , entryAccessGate: function ( ) {
+          return function (req, res, next) { req.entryScope = { readAll: true, devices: [ ] }; next(); };
+        }
+      }
       , cache: {treatments: [ ], devicestatus: [ ], entries: [ ], getData: function ( ) { return [ ]; }}
       , ddata: {sgvs: [ ]}
       , purifier: {purifyObject: function ( ) { }}
