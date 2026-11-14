@@ -11,7 +11,7 @@ if (PHP_SAPI !== 'cli') {
  * Kept dependency-free so it runs anywhere the panel does.
  */
 
-require __DIR__ . '/../lib/GlucoseStats.php';
+require __DIR__ . '/../vendor/autoload.php';
 
 use NightPanel\GlucoseStats;
 

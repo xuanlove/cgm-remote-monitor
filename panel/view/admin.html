@@ -1,0 +1,77 @@
+{extend name="layout/base" /}
+{block name="content"}
+<h1>{:t('adm.title')}</h1>
+
+{notempty name="settingsError"}<p class="msg-bad">{$settingsError}</p>{/notempty}
+
+<div class="card">
+  <h1 style="font-size:16px;">{:t('adm.nsStatus')}</h1>
+  {if condition="!empty($nsError)"}
+    <p class="msg-bad">{$nsError}</p>
+    <form method="post" action="/admin/settings">
+      <input type="hidden" name="csrf" value="{$csrf}">
+      <div class="grid">
+        <div><label>{:t('adm.url')}</label><input name="ns_url" placeholder="http://127.0.0.1:1337"></div>
+        <div><label>{:t('adm.secret')}</label><input name="ns_secret" type="password"></div>
+      </div>
+      <button>{:t('adm.saveConfig')}</button>
+      <span class="hint">{:t('adm.envNote')}</span>
+    </form>
+  {else /}
+    <p class="msg-ok">{:t_html('adm.connected', [
+      'version' => (string)($nsStatus['version'] ?? '?'),
+      'state' => (string)($nsStatus['runtimeState'] ?? '?'),
+      'language' => (string)($nsStatus['settings']['language'] ?? '?'),
+    ])}</p>
+    <form method="post" action="/admin/settings">
+      <input type="hidden" name="csrf" value="{$csrf}">
+      <div class="grid">
+        <div><label>{:t('adm.urlOverride')}</label><input name="ns_url" placeholder="{:t('adm.keepEmpty')}"></div>
+        <div><label>{:t('adm.secretOverride')}</label><input name="ns_secret" type="password" placeholder="{:t('adm.keepEmpty')}"></div>
+      </div>
+      <button>{:t('adm.updateConfig')}</button>
+    </form>
+  {/if}
+  <p class="hint">
+    {:t('adm.sourceUrl')}:
+    {if condition="$configSource['url'] === 'env'"}{:t('adm.sourceEnv')}{elseif condition="$configSource['url'] === 'db'" /}{:t('adm.sourceDb')}{else /}{:t('adm.sourceNone')}{/if}
+    ·
+    {:t('adm.sourceSecret')}:
+    {if condition="$configSource['secret'] === 'env'"}{:t('adm.sourceEnv')}{elseif condition="$configSource['secret'] === 'db'" /}{:t('adm.sourceDb')}{else /}{:t('adm.sourceNone')}{/if}
+  </p>
+</div>
+
+<div class="card">
+  <h1 style="font-size:16px;">{:t_html('adm.users', ['n' => count($users)])}</h1>
+  <table>
+    <thead><tr>
+      <th>{:t('adm.col.id')}</th>
+      <th>{:t('adm.col.username')}</th>
+      <th>{:t('adm.col.role')}</th>
+      <th>{:t('adm.col.subject')}</th>
+      <th>{:t('adm.col.createdAt')}</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+    {foreach $users as $u}
+      <tr>
+        <td>{$u.id}</td>
+        <td><code>{$u.username}</code></td>
+        <td>{$u.role}</td>
+        <td class="hint">{$u['ns_subject_id']|default='-'}</td>
+        <td class="hint">{$u.created_at}</td>
+        <td>
+          {if condition="$u['role'] !== 'admin'"}
+          <form method="post" action="/admin/users/delete" onsubmit="return confirm('{:t_html('adm.confirmDelete', ['name' => $u['username']])}')">
+            <input type="hidden" name="csrf" value="{$csrf}">
+            <input type="hidden" name="id" value="{$u.id}">
+            <button class="danger" style="margin:0;padding:4px 10px;">{:t('adm.delete')}</button>
+          </form>
+          {/if}
+        </td>
+      </tr>
+    {/foreach}
+    </tbody>
+  </table>
+</div>
+{/block}

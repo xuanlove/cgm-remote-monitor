@@ -1,0 +1,12 @@
+#!/usr/bin/env php
+<?php
+declare(strict_types=1);
+
+namespace think;
+
+require __DIR__ . '/vendor/autoload.php';
+
+$app = new App();
+$app->register(\app\AppService::class);
+
+$app->console->run();

@@ -247,6 +247,13 @@ return [
     'adm.col.createdAt' => 'Registered',
     'adm.delete' => 'Delete',
     'adm.confirmDelete' => 'Delete user :name and their Nightscout subject?',
+    'adm.errUrl' => 'The Nightscout URL must be a full http/https URL.',
+    'adm.errSecret' => 'The API_SECRET contains control characters or is longer than 255.',
+    'adm.sourceUrl' => 'URL source',
+    'adm.sourceSecret' => 'Secret source',
+    'adm.sourceEnv' => 'environment (wins)',
+    'adm.sourceDb' => 'database',
+    'adm.sourceNone' => 'not configured',
 
     // ----------------------------------------------------------- validation
     'err.404title' => '404 · Page not found',
@@ -259,6 +266,7 @@ return [
     'err.nsUnavailable' => 'Nightscout backend unavailable: :msg',
     'err.panel' => 'Panel error: :msg',
     'err.nsNotConfigured' => 'The Nightscout backend is not configured yet.',
+    'err.method' => 'This address does not accept that request method.',
     'err.noToken' => 'This account has no Nightscout token bound.',
 
     'val.usernameFormat' => 'Use lower-case letters, digits, underscore or dash, 3-24 characters, starting with a letter or digit',

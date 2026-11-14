@@ -14,7 +14,7 @@ if (PHP_SAPI !== 'cli') {
  * the raw key to the user).
  */
 
-require __DIR__ . '/../lib/Lang.php';
+require __DIR__ . '/../vendor/autoload.php';
 
 use NightPanel\Lang;
 
@@ -80,8 +80,18 @@ foreach ($zh as $key => $value) {
 check('placeholders match across locales', $placeholderMismatch === [], implode(', ', $placeholderMismatch));
 
 // --- every key used in the code exists -------------------------------------
-$files = glob(__DIR__ . '/../views/*.php');
-$files[] = __DIR__ . '/../index.php';
+$files = [];
+foreach ([__DIR__ . '/../app', __DIR__ . '/../view'] as $dir) {
+    $it = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
+    );
+    foreach ($it as $file) {
+        if (in_array($file->getExtension(), ['php', 'html'], true)) {
+            $files[] = $file->getPathname();
+        }
+    }
+}
+sort($files);
 
 $used = [];
 foreach ($files as $file) {
@@ -89,6 +99,11 @@ foreach ($files as $file) {
     // t('key') and Lang::t('key') calls.
     preg_match_all('/\bt\(\'([a-z][a-z0-9_]*(?:\.[a-zA-Z0-9_]+)+)\'/', $source, $direct);
     foreach ($direct[1] as $key) {
+        $used[$key] = basename($file);
+    }
+    // t_html('key', [...]) escapes the translated string with its data.
+    preg_match_all('/\bt_html\(\'([a-z][a-z0-9_]*(?:\.[a-zA-Z0-9_]+)+)\'/', $source, $escaped);
+    foreach ($escaped[1] as $key) {
         $used[$key] = basename($file);
     }
     // Keys listed in Lang::js([...]) blocks.

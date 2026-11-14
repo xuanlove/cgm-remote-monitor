@@ -14,8 +14,7 @@ if (PHP_SAPI !== 'cli') {
  * database and is exercised end-to-end against the running panel.
  */
 
-require __DIR__ . '/../lib/Db.php';
-require __DIR__ . '/../lib/Alerts.php';
+require __DIR__ . '/../vendor/autoload.php';
 
 use NightPanel\Alerts;
 

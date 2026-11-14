@@ -3,3 +3,11 @@ data/
 *.db
 *.db-wal
 *.db-shm
+*.db.key
+
+# Composer dependencies (installed on the server)
+/vendor/
+
+# ThinkPHP runtime (cache, logs, compiled templates)
+/runtime/*
+!/runtime/.gitkeep

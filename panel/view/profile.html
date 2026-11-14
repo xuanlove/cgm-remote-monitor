@@ -1,0 +1,47 @@
+{extend name="layout/base" /}
+{block name="content"}
+<h1>{:t_html('prof.title', ['name' => $user['username']])}</h1>
+
+{notempty name="error"}<p class="msg-bad">{$error}</p>{/notempty}
+{notempty name="success"}<p class="msg-ok">{:t('prof.saved')}</p>{/notempty}
+
+{if condition="empty($profile)"}
+  <div class="card"><p>{:t('prof.missing')}</p></div>
+{else /}
+<form method="post" action="/profile">
+  <input type="hidden" name="csrf" value="{$csrf}">
+  <div class="card">
+    <div class="grid">
+      <div>
+        <label>{:t('prof.dia')}</label>
+        <input name="dia" type="number" step="0.1" value="{$profile.dia|default=3}">
+        <label>{:t('prof.carbsHr')}</label>
+        <input name="carbs_hr" type="number" step="1" value="{$profile.carbs_hr|default=30}">
+        <label>{:t('prof.timezone')}</label>
+        <input name="timezone" value="{$profile.timezone|default='UTC'}">
+      </div>
+      <div>
+        <label>{:t('prof.basal')}</label>
+        <textarea name="basal">{foreach $profile.basal as $pair}{$pair.0},{$pair.1}
+{/foreach}</textarea>
+      </div>
+      <div>
+        <label>{:t('prof.sens')}</label>
+        <textarea name="sens">{foreach $profile.sens as $pair}{$pair.0},{$pair.1}
+{/foreach}</textarea>
+      </div>
+      <div>
+        <label>{:t('prof.targetLow')}</label>
+        <textarea name="target_low">{foreach $profile.target_low as $pair}{$pair.0},{$pair.1}
+{/foreach}</textarea>
+        <label>{:t('prof.targetHigh')}</label>
+        <textarea name="target_high">{foreach $profile.target_high as $pair}{$pair.0},{$pair.1}
+{/foreach}</textarea>
+      </div>
+    </div>
+    <button>{:t_html('prof.save', ['name' => $user['username']])}</button>
+    <span class="hint">{:t('prof.scopeNote')}</span>
+  </div>
+</form>
+{/if}
+{/block}

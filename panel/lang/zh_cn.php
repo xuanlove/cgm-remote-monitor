@@ -247,6 +247,13 @@ return [
     'adm.col.createdAt' => '注册时间',
     'adm.delete' => '删除',
     'adm.confirmDelete' => '删除用户 :name 及其 Nightscout subject？',
+    'adm.errUrl' => 'Nightscout 地址必须是 http/https 开头的完整 URL。',
+    'adm.errSecret' => 'API_SECRET 含非法控制字符或长度超过 255。',
+    'adm.sourceUrl' => 'URL 来源',
+    'adm.sourceSecret' => '密钥来源',
+    'adm.sourceEnv' => '环境变量（优先）',
+    'adm.sourceDb' => '数据库',
+    'adm.sourceNone' => '未配置',
 
     // ----------------------------------------------------------- validation
     'err.404title' => '404 · 页面不存在',
@@ -259,6 +266,7 @@ return [
     'err.nsUnavailable' => 'Nightscout 后端不可用：:msg',
     'err.panel' => '面板错误：:msg',
     'err.nsNotConfigured' => 'Nightscout 后端尚未配置。',
+    'err.method' => '该地址不支持这个请求方法。',
     'err.noToken' => '该账号未绑定 Nightscout token。',
 
     'val.usernameFormat' => '用户名只能包含小写字母、数字、下划线和短横线，长度 3-24，且以字母或数字开头',

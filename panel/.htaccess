@@ -1,9 +1,0 @@
-# Apache equivalent of the nginx deny block documented in README.md.
-# Runtime data (SQLite mirror, WAL files, sync lock) and application sources
-# are never served; index.php handles every request.
-<IfModule mod_rewrite.c>
-    RewriteEngine On
-    RewriteRule ^(?:data|lib|bin|tests|lang)(?:/|$) - [F,L]
-    # Development demo page, not part of the panel.
-    RewriteRule ^glucose-trend-demo\.html$ - [F,L]
-</IfModule>

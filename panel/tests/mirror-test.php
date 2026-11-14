@@ -15,8 +15,7 @@ $dbFile = sys_get_temp_dir() . '/panel-mirror-test-' . getmypid() . '.db';
 @unlink($dbFile);
 putenv('PANEL_DB=' . $dbFile);
 
-require __DIR__ . '/../lib/Db.php';
-require __DIR__ . '/../lib/Mirror.php';
+require __DIR__ . '/../vendor/autoload.php';
 
 use NightPanel\Db;
 use NightPanel\Mirror;
