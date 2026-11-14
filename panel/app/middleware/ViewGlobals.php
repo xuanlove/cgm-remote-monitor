@@ -19,7 +19,10 @@ class ViewGlobals
 {
     public function handle(Request $request, Closure $next): Response
     {
+        // One SELECT per request: route middleware (Authenticate, AdminOnly)
+        // reads the context this fills instead of hitting the database again.
         $user = PanelContext::user() ?? Auth::user();
+        PanelContext::setUser($user);
 
         $locales = [];
         foreach (Lang::available() as $code => $name) {

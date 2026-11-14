@@ -79,11 +79,16 @@ final class UserService
                 $provisioned['roleName'],
                 Db::encrypt($provisioned['token']),
             ]);
-        } catch (\PDOException $e) {
-            // Two registrations can pass find() at once; the unique index picks
-            // a winner. Undo the loser's Nightscout subject and role so no
-            // orphan grant is left behind.
+        } catch (\Throwable $e) {
+            // The account did not land: undo the Nightscout identity so no
+            // orphan grant is left behind — whatever the failure was. Two
+            // registrations can pass find() at once and the unique index
+            // picks a winner; any other failure (a broken key seed, a locked
+            // database) is rethrown as a 500 after the cleanup.
             UserProvisioner::rollback($provisioned, $client);
+            if (!($e instanceof \PDOException && str_contains($e->getMessage(), 'UNIQUE'))) {
+                throw $e;
+            }
             return [Lang::t('val.usernameTaken'), null];
         }
 

@@ -10,19 +10,6 @@ namespace NightPanel;
  */
 final class Auth
 {
-    public static function boot(): void
-    {
-        if (session_status() === PHP_SESSION_NONE) {
-            session_set_cookie_params([
-                'httponly' => true,
-                'samesite' => 'Lax',
-                'secure' => self::isHttps(),
-            ]);
-            session_name('nightpanel');
-            session_start();
-        }
-    }
-
     /**
      * Whether the request reached us over HTTPS. nginx terminating TLS reports
      * plain HTTP to php-fpm, so X-Forwarded-Proto is honoured, but only from a

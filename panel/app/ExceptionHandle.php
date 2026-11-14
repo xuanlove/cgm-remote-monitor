@@ -34,7 +34,10 @@ class ExceptionHandle extends Handle
             }
         }
 
-        return $this->page('error', t('err.panel', ['msg' => $e->getMessage()]), 500);
+        // A generic failure can carry anything: SQL fragments, file paths,
+        // vendor internals. The framework's report() already logged the
+        // detail; the page stays deliberately vague.
+        return $this->page('error', t('err.generic'), 500);
     }
 
     /** Template rendering must never mask the original failure. */

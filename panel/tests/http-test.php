@@ -85,6 +85,17 @@ if ($caseIndex !== false) {
 // --------------------------------------------------------------- parent mode
 require __DIR__ . '/../vendor/autoload.php';
 
+define('PANEL_DB_FILE', $dbFile);
+
+// The session cookie flags are pinned by the middleware, not inherited from
+// the host's php.ini: a non-root cookie_path would silently drop the session
+// on every page but one. Run the real middleware once here — before this
+// script has printed anything, because after the first echo PHP refuses to
+// apply session_set_cookie_params, and after the define above so the DB
+// handle binds to the throwaway database — and assert the values below.
+(new \app\middleware\StartSession())->handle(new \think\Request(), static fn() => \think\Response::create('ok'));
+$cookie = session_get_cookie_params();
+
 $failures = 0;
 $checks = 0;
 function check(string $name, bool $ok, string $detail = ''): void
@@ -105,7 +116,6 @@ echo "HTTP routing\n";
 if (!is_dir($dbDir)) {
     mkdir($dbDir, 0770, true);
 }
-define('PANEL_DB_FILE', $dbFile);
 \NightPanel\Db::pdo();
 \NightPanel\Backends::create('NS Test', 'http://127.0.0.1:1337', 'secret');
 file_put_contents(dirname($dbFile) . '/install.lock', 'installed ' . gmdate('c') . "\n");
@@ -138,6 +148,9 @@ foreach (array_values($cases) as $index => $case) {
                 ? ', location "' . $location . '" misses "' . $locationNeedle . '"' : '')
     );
 }
+
+check('session cookie path is pinned to /', $cookie['path'] === '/', 'path=' . $cookie['path']);
+check('session cookie is httponly + samesite lax', $cookie['httponly'] === true && strtolower((string)$cookie['samesite']) === 'lax', 'httponly=' . var_export($cookie['httponly'], true) . ' samesite=' . var_export($cookie['samesite'], true));
 
 @unlink($dbFile);
 @unlink($dbFile . '-wal');

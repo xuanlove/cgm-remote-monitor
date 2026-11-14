@@ -10,9 +10,14 @@ if (PHP_SAPI !== 'cli') {
  * Checks for the alert threshold rules. Run with:
  *   php panel/tests/alerts-test.php
  *
- * Only the pure parts are covered here (validation + state); storage needs a
- * database and is exercised end-to-end against the running panel.
+ * Validation-failure paths still read the stored settings back, so the
+ * database lives in a throwaway temp file (PANEL_DB_FILE) instead of the
+ * project's real data/ directory.
  */
+
+$dbFile = sys_get_temp_dir() . '/panel-alerts-test-' . getmypid() . '.db';
+@unlink($dbFile);
+define('PANEL_DB_FILE', $dbFile);
 
 require __DIR__ . '/../vendor/autoload.php';
 
@@ -53,8 +58,9 @@ $off = ['low' => 3.9, 'high' => 10.0, 'enabled' => false, 'browser' => true];
 check('disabled alerts never fire', Alerts::state(2.5, $off) === null);
 
 // --- validation ------------------------------------------------------------
-// save() touches the database only after validation, so invalid input can be
-// checked without one: each call must return an error and no new settings.
+// save() reads the stored settings on every failure path, so these cases
+// exercise the temp database too: each call must return an error and write
+// nothing new.
 function saveError(array $input): ?string
 {
     try {
@@ -78,6 +84,10 @@ check('low greater than high is rejected', saveError(['low' => '9', 'high' => '7
 // A valid pair passes validation and reaches storage.
 $valid = saveError(['low' => '3.5', 'high' => '9.5', 'enabled' => '1']);
 check('a valid pair passes validation', $valid === 'REACHED_DB' || $valid === null, (string)$valid);
+
+@unlink($dbFile);
+@unlink($dbFile . '-wal');
+@unlink($dbFile . '-shm');
 
 echo "\n" . ($failures === 0 ? "OK — $checks checks passed\n" : "FAILED — $failures of $checks checks\n");
 exit($failures === 0 ? 0 : 1);

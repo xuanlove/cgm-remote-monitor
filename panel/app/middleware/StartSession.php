@@ -21,10 +21,14 @@ class StartSession
     public function handle(Request $request, Closure $next): Response
     {
         if (session_status() === PHP_SESSION_NONE) {
+            // Same cookie flags as install.php's session, including the
+            // explicit path: a host php.ini with a non-root cookie_path
+            // would otherwise drop the session for every other page.
             session_set_cookie_params([
                 'httponly' => true,
                 'samesite' => 'Lax',
                 'secure' => Auth::isHttps(),
+                'path' => '/',
             ]);
             session_name('nightpanel');
             session_start();

@@ -249,12 +249,6 @@ final class Db
         return $plain;
     }
 
-    /** The single key, derived from the in-database seed. */
-    private static function keys(): array
-    {
-        return [self::encryptionKey()];
-    }
-
     /** The key used for new ciphertext. */
     private static function encryptionKey(): string
     {
