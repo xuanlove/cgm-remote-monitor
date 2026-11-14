@@ -224,27 +224,30 @@ final class NsClient
     }
 
     /** Bulk-write entries, keeping the original date/device fields. */
-    public function bulkPostEntries(array $entries): void
+    public function bulkPostEntries(array $entries): array
     {
-        if ($entries !== []) {
-            $this->requestOrThrow('POST', '/api/v1/entries.json', array_values($entries));
+        if ($entries === []) {
+            return [];
         }
+        return $this->requestOrThrow('POST', '/api/v1/entries.json', array_values($entries));
     }
 
     /** Bulk-write treatments, keeping created_at/enteredBy. */
-    public function bulkPostTreatments(array $treatments): void
+    public function bulkPostTreatments(array $treatments): array
     {
-        if ($treatments !== []) {
-            $this->requestOrThrow('POST', '/api/v1/treatments.json', array_values($treatments));
+        if ($treatments === []) {
+            return [];
         }
+        return $this->requestOrThrow('POST', '/api/v1/treatments.json', array_values($treatments));
     }
 
     /** Bulk-write devicestatus records. */
-    public function bulkPostDeviceStatus(array $records): void
+    public function bulkPostDeviceStatus(array $records): array
     {
-        if ($records !== []) {
-            $this->requestOrThrow('POST', '/api/v1/devicestatus.json', array_values($records));
+        if ($records === []) {
+            return [];
         }
+        return $this->requestOrThrow('POST', '/api/v1/devicestatus.json', array_values($records));
     }
 
     /** Delete every entry of a device (source cleanup after migration). */

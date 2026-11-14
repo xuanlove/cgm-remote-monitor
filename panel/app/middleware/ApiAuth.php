@@ -11,22 +11,28 @@ use think\Request;
 use think\Response;
 
 /**
- * Authentication for the Nightscout-compatible read API.
+ * Authentication for the Nightscout-compatible API.
  *
  * Two callers: the panel session (browser use), and the `api-secret` header
  * carrying the same Nightscout token the myapi page hands out (scripts, CGM
  * uploaders). Unauthorised calls answer the exact JSON shape the Nightscout
  * fork uses (lib/middleware/send-json-status.js), so a client cannot tell the
  * panel and the backend apart by the error body.
+ *
+ * Write endpoints run with mode 'token': the session branch is skipped, so
+ * writes always require the api-secret header — the same rule the backend
+ * applies, and it keeps the record's owner unambiguous.
  */
 class ApiAuth
 {
-    public function handle(Request $request, Closure $next): Response
+    public function handle(Request $request, Closure $next, string $mode = 'any'): Response
     {
-        $user = PanelContext::user() ?? Auth::user();
-        if ($user !== null) {
-            PanelContext::setUser($user);
-            return $next($request);
+        if ($mode !== 'token') {
+            $user = PanelContext::user() ?? Auth::user();
+            if ($user !== null) {
+                PanelContext::setUser($user);
+                return $next($request);
+            }
         }
 
         // Header only: a ?token= query parameter would leak the token into

@@ -204,21 +204,27 @@ php bin/sync.php --profiles
 
 ## 面板端 Nightscout 兼容 API
 
-面板在 `/api/v1/…` 下提供与 Nightscout v1 **形状一致的只读端点**，数据读本地镜像（毫秒级，后端掉线仍可读）——第三方工具、CGM 上传器与脚本可以直接把面板当 Nightscout 用：
+面板在 `/api/v1/…` 下提供与 Nightscout v1 **形状一致的读写端点**——第三方工具、CGM 上传器（xDrip+/Loop/AAPS）与脚本可以直接把面板当 Nightscout 用，上传地址填 `https://panel.example.com/api/v1/`：
 
 | 端点 | 说明 | 参数 |
 |------|------|------|
-| `GET /api/v1/entries.json` | 血糖数组，最新在前 | `count`（默认 10，上限 1000，0 → 空数组）、`find[type]=sgv\|mbg`（缺省合并两类）、`find[date][$gte]/[$lt]`（毫秒）、`find[device]`（标量或 `$in`） |
-| `GET /api/v1/treatments.json` | 治疗数组，最新在前 | `count`（默认 100，带 find[] 时 1000）、`find[created_at][$gte]/[$lt]`（ISO 时间） |
+| `GET /api/v1/entries.json` | 血糖数组，最新在前（本地镜像） | `count`（默认 10，上限 1000，0 → 空数组）、`find[type]=sgv\|mbg`（缺省合并两类）、`find[date][$gte]/[$lt]`（毫秒）、`find[device]`（标量或 `$in`） |
+| `GET /api/v1/treatments.json` | 治疗数组，最新在前（本地镜像） | `count`（默认 100，带 find[] 时 1000）、`find[created_at][$gte]/[$lt]`（ISO 时间） |
 | `GET /api/v1/devicestatus.json` | 数组（镜像每账号只存最新一条，至多 1 个元素） | `count` |
 | `GET /api/v1/profile.json` | 档案记录数组，`store` 只含调用者自己的条目 | `count` |
 | `GET /api/v1/profile/current` | 当前档案单对象（同上投影） | — |
 | `GET /api/v1/status.json` | 面板状态（形状与 NS status.json 对齐） | — |
+| `POST /api/v1/entries.json` | 上传血糖/校准等（单对象或数组，≤10000 条）→ 返回创建记录数组 | 归属强制：`device = 用户名`；缺 `date` 时从 `dateString` 推导 |
+| `POST /api/v1/treatments.json` | 上传治疗记录 → 返回创建记录数组 | 归属强制：`enteredBy = 用户名`；缺 `created_at` 时服务端补当前时间 |
+| `POST /api/v1/devicestatus.json` | 上传设备状态 → 返回创建记录数组 | 归属强制：`device = 用户名` |
+| `PUT /api/v1/profile.json` | 更新自己的 Profile 档案（代理到后端，scoped 合并语义：他人 store 键不受影响） | `store` 必须含调用者自己的键，多余键不转发；缺 `_id` 时自动取现行记录 |
 
-- **鉴权**：面板登录会话，或 `api-secret: <accessToken>` 头（与后端同一个 token，见设置 → 我的 API）。只接受请求头，不接受 `?token=` 查询串。
-- **错误形状与后端一致**：未授权 401 `{status,message:'Unauthorized',description:'Invalid/Missing'}`；未知 `find[]` 过滤键与不受支持的操作符一律 400（fail-closed，不静默忽略）；限流 120 次/分钟（按 IP），超限 429。
+- **鉴权**：读 = 面板登录会话 或 `api-secret: <accessToken>` 头；**写 = 仅 `api-secret` 头**（与会话无关，和直连 Nightscout 的规则一致）。只接受请求头，不接受 `?token=` 查询串。
+- **归属强制**：写路径在面板侧注入 `device` / `enteredBy` = 用户名后转发 Nightscout（真相源）并回写本地镜像——调用者无法伪造他人归属。
+- **错误形状与后端一致**：未授权 401 `{status,message:'Unauthorized',description:'Invalid/Missing'}`；非法 payload/未知 `find[]` 过滤键 400（fail-closed，不静默忽略）；限流 120 次/分钟（按 IP），超限 429；Nightscout 不可用时写请求 502。
 - **条件请求**：entries/treatments 带 `Last-Modified` 头，`If-Modified-Since` 不早于最新记录时回 304。
-- 未安装时所有端点 302 跳转安装器；裸路径与任意后缀（`.json` 等）都可用——面板的 URL 后缀配置允许任意后缀，均以 JSON 应答。写路径不在兼容 API 内——写入仍按上文「我的 API」直连 Nightscout。
+- 未安装时所有端点 302 跳转安装器；裸路径与任意后缀（`.json` 等）都可用——面板的 URL 后缀配置允许任意后缀，均以 JSON 应答。
+- DELETE 路由不在兼容 API 范围内；面板自身的表单写路径（/entry、/treatments 等）不变。
 
 ## 功能页
 

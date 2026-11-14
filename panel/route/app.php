@@ -119,4 +119,19 @@ Route::group(function () {
 })->middleware(Throttle::class, 'api', 120, 60, 'json')
   ->middleware(ApiAuth::class);
 
+// Writes: same attribution rules as the backend applies for the caller's
+// token (device / enteredBy = username). Token auth only — writes always
+// need the api-secret header, exactly like they do against Nightscout.
+Route::group(function () {
+    Route::post('api/v1/entries', 'NsApi/postEntries')->ext('json');
+    Route::post('api/v1/entries', 'NsApi/postEntries');
+    Route::post('api/v1/treatments', 'NsApi/postTreatments')->ext('json');
+    Route::post('api/v1/treatments', 'NsApi/postTreatments');
+    Route::post('api/v1/devicestatus', 'NsApi/postDeviceStatus')->ext('json');
+    Route::post('api/v1/devicestatus', 'NsApi/postDeviceStatus');
+    Route::put('api/v1/profile', 'NsApi/putProfile')->ext('json');
+    Route::put('api/v1/profile', 'NsApi/putProfile');
+})->middleware(Throttle::class, 'api', 120, 60, 'json')
+  ->middleware(ApiAuth::class, 'token');
+
 Route::miss('Error/notFound');

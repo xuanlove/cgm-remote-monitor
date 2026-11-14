@@ -4,25 +4,164 @@ declare(strict_types=1);
 namespace app\controller;
 
 use app\service\PanelContext;
+use app\service\ProfileService;
+use NightPanel\Auth;
+use NightPanel\Backends;
 use NightPanel\Mirror;
 use think\Request;
 use think\Response;
 
 /**
- * Nightscout-compatible READ API, served from the local mirror.
+ * Nightscout-compatible API, served from the panel.
  *
- * Every response is a bare JSON array (or object for status/profile current)
- * shaped like the Nightscout v1 endpoints, newest record first, scoped to
- * the authenticated user: the mirror is per-user, so the scope the backend
- * enforces with device filters is inherent here. Writes stay on Nightscout
- * itself — these endpoints never mutate anything.
+ * Reads come from the local mirror; writes are proxied to the user's
+ * Nightscout backend with the attribution forced server-side (device /
+ * enteredBy = username — the same scope the backend enforces for the user's
+ * token) and the mirror updated from the created records. Every response is
+ * a bare JSON array (or object for status/profile current) shaped like the
+ * Nightscout v1 endpoints, newest record first.
  */
 class NsApiController extends BaseController
 {
     /** Ceiling shared by every endpoint; Nightscout caps its own reads too. */
     private const MAX_COUNT = 1000;
 
+    /** Nightscout's own batch ceiling for write payloads (write-payload.js). */
+    private const MAX_BATCH = 10000;
+
     private const VERSION = '1.0';
+
+    // ----------------------------------------------------------- write paths
+
+    /**
+     * Upload entries: CGM readings, calibrations, anything Nightscout
+     * stores in its entries collection. Every record is attributed to the
+     * caller before it leaves the panel.
+     */
+    public function postEntries(Request $request): Response
+    {
+        $user = PanelContext::requireUser();
+        [$documents, $error] = $this->documentsFromBody($request);
+        if ($error !== null) {
+            return $error;
+        }
+        $single = count($documents) === 1;
+
+        foreach ($documents as &$record) {
+            $record['device'] = (string)$user['username'];
+            if (!isset($record['date']) && isset($record['dateString'])) {
+                $parsed = strtotime((string)$record['dateString']);
+                if ($parsed !== false) {
+                    $record['date'] = $parsed * 1000;
+                }
+            }
+        }
+        unset($record);
+
+        // Historical Nightscout no-op: a single object without any date is
+        // accepted and answered with an empty array, nothing stored.
+        if ($single && !isset($documents[0]['date'])) {
+            return $this->jsonOut([]);
+        }
+
+        $created = $this->normalizeCreated(
+            Backends::clientFor((int)($user['backend_id'] ?? 0))->bulkPostEntries($documents)
+        );
+        foreach ($created as $record) {
+            Mirror::storeApiEntry((int)$user['id'], $record);
+        }
+        return $this->jsonOut($created);
+    }
+
+    /**
+     * Upload treatments: boluses, carbs, notes — any eventType the backend
+     * accepts. Attribution and created_at are forced server-side.
+     */
+    public function postTreatments(Request $request): Response
+    {
+        $user = PanelContext::requireUser();
+        [$documents, $error] = $this->documentsFromBody($request);
+        if ($error !== null) {
+            return $error;
+        }
+
+        foreach ($documents as &$record) {
+            $record['enteredBy'] = (string)$user['username'];
+            if (!isset($record['created_at'])) {
+                $record['created_at'] = gmdate('c');
+            }
+        }
+        unset($record);
+
+        $created = $this->normalizeCreated(
+            Backends::clientFor((int)($user['backend_id'] ?? 0))->bulkPostTreatments($documents)
+        );
+        foreach ($created as $record) {
+            Mirror::storeTreatment((int)$user['id'], $record);
+        }
+        return $this->jsonOut($created);
+    }
+
+    /** Upload device status records (iob/cob/battery and uploader state). */
+    public function postDeviceStatus(Request $request): Response
+    {
+        $user = PanelContext::requireUser();
+        [$documents, $error] = $this->documentsFromBody($request);
+        if ($error !== null) {
+            return $error;
+        }
+
+        foreach ($documents as &$record) {
+            $record['device'] = (string)$user['username'];
+        }
+        unset($record);
+
+        $created = $this->normalizeCreated(
+            Backends::clientFor((int)($user['backend_id'] ?? 0))->bulkPostDeviceStatus($documents)
+        );
+        foreach ($created as $record) {
+            Mirror::storeDeviceStatus((int)$user['id'], $record);
+        }
+        return $this->jsonOut($created);
+    }
+
+    /**
+     * Update the caller's profile store entry. The body goes to the backend
+     * with the caller's own token, so the backend's scoped-merge semantics
+     * apply: only this user's store key changes, everyone else's survives.
+     * The mirror snapshot refreshes afterwards.
+     */
+    public function putProfile(Request $request): Response
+    {
+        $user = PanelContext::requireUser();
+        $body = json_decode((string)$request->getContent(), true);
+        if (!is_array($body) || !isset($body['store']) || !is_array($body['store'])) {
+            return $this->badRequest('profile body expects a store object');
+        }
+        $username = (string)$user['username'];
+        if (!isset($body['store'][$username])) {
+            return $this->badRequest('profile store must contain your own entry');
+        }
+        // Defensive projection: the backend strips other users' keys for
+        // scoped tokens anyway, but the panel never forwards them.
+        $body['store'] = [$username => $body['store'][$username]];
+        if (!isset($body['_id'])) {
+            $record = ProfileService::recordLive($user);
+            if ($record === null) {
+                return $this->badRequest('no profile record exists yet on the backend');
+            }
+            $body['_id'] = (string)$record['_id'];
+        }
+
+        $created = Backends::clientFor((int)($user['backend_id'] ?? 0))->requestOrThrow(
+            'PUT',
+            '/api/v1/profile.json',
+            $body,
+            Auth::userToken($user)
+        );
+        ProfileService::refreshSnapshot($user);
+        return $this->jsonOut($created);
+    }
 
     // ------------------------------------------------------------- endpoints
 
@@ -147,6 +286,49 @@ class NsApiController extends BaseController
     }
 
     // --------------------------------------------------------------- helpers
+
+    /**
+     * Parse a write payload the way the Nightscout fork's write-payload
+     * normalizer does: a single object or an array of objects, capped at
+     * MAX_BATCH. Errors answer in the fork's exact 400 shapes.
+     *
+     * @return array{0:?array<int,array<string,mixed>>,1:?Response}
+     */
+    private function documentsFromBody(Request $request): array
+    {
+        $body = json_decode((string)$request->getContent(), true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            return [null, $this->badRequest('Invalid JSON body')];
+        }
+        $documents = is_array($body) && !array_is_list($body) ? [$body] : $body;
+        if (!is_array($documents)) {
+            return [null, $this->badRequest('Expected an object or array of objects', 'Invalid entries payload')];
+        }
+        if (count($documents) > self::MAX_BATCH) {
+            return [null, $this->badRequest('Maximum records per request: ' . self::MAX_BATCH, 'Too many entries')];
+        }
+        foreach ($documents as $document) {
+            if (!is_array($document) || array_is_list($document)) {
+                return [null, $this->badRequest('Expected an object or array of objects', 'Invalid entries payload')];
+            }
+        }
+        return [$documents, null];
+    }
+
+    /**
+     * Nightscout answers writes with the created record(s) — a single object
+     * or an array depending on endpoint; the panel mirrors every created
+     * record, so normalize to a list first.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function normalizeCreated(mixed $body): array
+    {
+        if (is_array($body) && array_is_list($body)) {
+            return $body;
+        }
+        return is_array($body) ? [$body] : [];
+    }
 
     /**
      * The backend's profile records with every store key but the caller's
@@ -344,9 +526,9 @@ class NsApiController extends BaseController
         return $response;
     }
 
-    /** 400 in the Nightscout error shape. */
-    private function badRequest(string $description): Response
+    /** 400 in the Nightscout error shape (sendJSONStatus: message + description). */
+    private function badRequest(string $description, string $message = 'Bad Request'): Response
     {
-        return $this->jsonOut(['status' => 400, 'message' => 'Bad Request', 'description' => $description], 400);
+        return $this->jsonOut(['status' => 400, 'message' => $message, 'description' => $description], 400);
     }
 }

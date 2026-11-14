@@ -440,6 +440,97 @@ final class Mirror
     }
 
     /**
+     * Store an entry that arrived through the compat API: any Nightscout
+     * entry type, dates from `date`/`mills`/`dateString`. Records without a
+     * usable id or timestamp are silently skipped — the mirror only caches
+     * what the reports can order.
+     */
+    public static function storeApiEntry(int $userId, array $record): void
+    {
+        $nsId = (string)($record['_id'] ?? '');
+        if ($nsId === '') {
+            return;
+        }
+        $ts = self::recordMs($record);
+        if ($ts <= 0) {
+            return;
+        }
+        $type = (string)($record['type'] ?? 'sgv');
+        $value = null;
+        if (isset($record['sgv']) && is_numeric($record['sgv'])) {
+            $value = (float)$record['sgv'];
+        } elseif (isset($record['mbg']) && is_numeric($record['mbg'])) {
+            $value = (float)$record['mbg'];
+        }
+        $stmt = Db::pdo()->prepare(
+            'INSERT INTO panel_entries (user_id, ns_id, type, device, ts, sgv, direction, delta, raw)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(user_id, ns_id) DO UPDATE SET
+                type = excluded.type,
+                device = excluded.device,
+                ts = excluded.ts,
+                sgv = excluded.sgv,
+                direction = excluded.direction,
+                delta = excluded.delta,
+                raw = excluded.raw,
+                fetched_at = CURRENT_TIMESTAMP'
+        );
+        $stmt->execute([
+            $userId,
+            $nsId,
+            $type,
+            (string)($record['device'] ?? ''),
+            $ts,
+            $value,
+            isset($record['direction']) ? (string)$record['direction'] : null,
+            isset($record['delta']) && is_numeric($record['delta']) ? (float)$record['delta'] : null,
+            json_encode($record, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+        ]);
+    }
+
+    /** Millisecond timestamp of a record, mirroring Sync's priority order. */
+    private static function recordMs(array $record): int
+    {
+        if (isset($record['date']) && is_numeric($record['date'])) {
+            return (int)$record['date'];
+        }
+        if (isset($record['mills']) && is_numeric($record['mills'])) {
+            return (int)$record['mills'];
+        }
+        $iso = (string)($record['dateString'] ?? $record['created_at'] ?? '');
+        if ($iso !== '') {
+            $parsed = strtotime($iso);
+            return $parsed === false ? 0 : $parsed * 1000;
+        }
+        return 0;
+    }
+
+    /**
+     * Store the devicestatus record the compat API just wrote. The table
+     * keeps one row per account — the newest record wins.
+     */
+    public static function storeDeviceStatus(int $userId, array $record): void
+    {
+        $ts = self::recordMs($record);
+        $stmt = Db::pdo()->prepare(
+            'INSERT INTO panel_devicestatus (user_id, ns_id, ts, payload, fetched_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(user_id) DO UPDATE SET
+                ns_id = excluded.ns_id,
+                ts = excluded.ts,
+                payload = excluded.payload,
+                fetched_at = excluded.fetched_at'
+        );
+        $stmt->execute([
+            $userId,
+            (string)($record['_id'] ?? ''),
+            $ts > 0 ? $ts : null,
+            json_encode($record, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            gmdate('c'),
+        ]);
+    }
+
+    /**
      * @param array<int,array<string,mixed>> $rows
      * @return array<int,array<string,mixed>>
      */

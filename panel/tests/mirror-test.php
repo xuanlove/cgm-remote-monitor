@@ -128,6 +128,22 @@ $pdo->prepare(
 )->execute([$now, json_encode(['_id' => 'd1', 'iob' => ['iob' => 1.2]])]);
 check('latestDeviceStatus decodes the payload', abs(Mirror::latestDeviceStatus(1)['iob']['iob'] - 1.2) < 0.001);
 
+// Compat API write mirrors: any entry type, dates from dateString, upserts.
+Mirror::storeApiEntry(1, ['_id' => 'a1', 'type' => 'mbg', 'mbg' => 120, 'dateString' => gmdate('c', (int)($now / 1000)), 'device' => 'alice']);
+$row = Db::pdo()->query('SELECT type, device, ts, sgv FROM panel_entries WHERE user_id = 1 AND ns_id = "a1"')->fetch();
+check('storeApiEntry derives the type from the record', $row !== false && $row['type'] === 'mbg');
+check('storeApiEntry stores the mbg value', $row !== false && abs((float)$row['sgv'] - 120.0) < 0.001);
+check('storeApiEntry parses the dateString', $row !== false && (int)$row['ts'] === (int)($now / 1000) * 1000);
+Mirror::storeApiEntry(1, ['_id' => 'a1', 'type' => 'mbg', 'mbg' => 130, 'date' => $now]);
+check('storeApiEntry upserts by ns_id', (int)Db::pdo()->query('SELECT COUNT(*) FROM panel_entries WHERE user_id = 1 AND ns_id = "a1"')->fetchColumn() === 1);
+Mirror::storeApiEntry(1, ['type' => 'sgv', 'sgv' => 100, 'date' => $now]);
+check('storeApiEntry skips records without an id', (int)Db::pdo()->query('SELECT COUNT(*) FROM panel_entries WHERE user_id = 1 AND ns_id IS NULL')->fetchColumn() === 0);
+Mirror::storeDeviceStatus(1, ['_id' => 'ds2', 'uploader' => ['battery' => 66], 'date' => $now]);
+check('storeDeviceStatus upserts the row', abs(Mirror::latestDeviceStatus(1)['uploader']['battery'] - 66) < 0.001);
+Mirror::storeDeviceStatus(1, ['_id' => 'ds3', 'uploader' => ['battery' => 77]]);
+check('storeDeviceStatus keeps one row per user', (int)Db::pdo()->query('SELECT COUNT(*) FROM panel_devicestatus WHERE user_id = 1')->fetchColumn() === 1
+    && abs(Mirror::latestDeviceStatus(1)['uploader']['battery'] - 77) < 0.001);
+
 $profile = static fn(string $id, string $start): array => [
     1, $id, $start, json_encode(['_id' => $id, 'startDate' => $start, 'store' => ['alice' => ['dia' => 3, 'timezone' => 'Asia/Shanghai']]]),
 ];

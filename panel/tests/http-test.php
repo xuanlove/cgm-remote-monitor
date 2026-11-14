@@ -40,6 +40,8 @@ $cases = [
     'export needs a session' => ['GET', '/export/entries.csv', [], 302, '', '/login'],
     'register offers the backend choice' => ['GET', '/register', [], 200, 'name="backend"', ''],
     'api entries needs a token' => ['GET', '/api/v1/entries.json', [], 401, 'Unauthorized', ''],
+    'api writes need a token' => ['POST', '/api/v1/entries.json', [], 401, 'Unauthorized', ''],
+    'api profile writes need a token' => ['PUT', '/api/v1/profile.json', [], 401, 'Unauthorized', ''],
     'api entries rejects a wrong token' => ['GET', '/api/v1/entries.json', [], 401, 'Unauthorized', '', false,
         ['headers' => ['api-secret' => 'wrong-token']]],
     'api entries serves own records newest first' => ['GET', '/api/v1/entries.json', [], 200, '"sgv":120', '', false,

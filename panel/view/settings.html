@@ -217,6 +217,12 @@
     <h1 style="font-size:16px;">{:t('api.panelStatus')}</h1>
   <pre>curl "{$panelUrl}/api/v1/status.json" \
     -H "api-secret: &lt;{:t('api.token')}&gt;"</pre>
+
+    <h1 style="font-size:16px;">{:t('api.panelWrite')}</h1>
+  <pre>curl -X POST "{$panelUrl}/api/v1/treatments.json" \
+    -H "api-secret: &lt;{:t('api.token')}&gt;" -H "Content-Type: application/json" \
+    -d '{"eventType":"Meal Bolus","carbs":30,"insulin":3}'</pre>
+    <p class="hint">{:t_html('api.panelWriteHint', ['base' => $panelUrl, 'name' => $user['username']])}</p>
   </div>
 
   <div class="card">
