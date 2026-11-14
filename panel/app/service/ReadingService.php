@@ -46,11 +46,11 @@ final class ReadingService
      *
      * @return array{0:int,1:int}
      */
-    public static function dayWindow(string $date, string $username): array
+    public static function dayWindow(string $date, string $username, int $backendId): array
     {
         $tz = new \DateTimeZone('UTC');
         try {
-            $record = Mirror::profileRecord();
+            $record = Mirror::profileRecord($backendId);
             $zone = (string)($record['store'][$username]['timezone'] ?? '');
             if ($zone !== '') {
                 $tz = new \DateTimeZone($zone);

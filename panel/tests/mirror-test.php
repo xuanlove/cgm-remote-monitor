@@ -17,6 +17,7 @@ define('PANEL_DB_FILE', $dbFile);
 
 require __DIR__ . '/../vendor/autoload.php';
 
+use app\service\ReadingService;
 use NightPanel\Db;
 use NightPanel\Mirror;
 
@@ -111,7 +112,7 @@ $pdo->prepare(
 check('latestDeviceStatus decodes the payload', abs(Mirror::latestDeviceStatus(1)['iob']['iob'] - 1.2) < 0.001);
 
 $profile = static fn(string $id, string $start): array => [
-    1, $id, $start, json_encode(['_id' => $id, 'startDate' => $start, 'store' => ['alice' => ['dia' => 3]]]),
+    1, $id, $start, json_encode(['_id' => $id, 'startDate' => $start, 'store' => ['alice' => ['dia' => 3, 'timezone' => 'Asia/Shanghai']]]),
 ];
 $pIns = $pdo->prepare(
     'INSERT INTO panel_profiles (backend_id, ns_id, start_date, payload) VALUES (?, ?, ?, ?)'
@@ -120,6 +121,14 @@ $pIns->execute($profile('p1', '2026-01-01T00:00:00.000Z'));
 $pIns->execute($profile('p2', '2026-06-01T00:00:00.000Z'));
 check('profileRecord picks the newest record', Mirror::profileRecord(1)['_id'] === 'p2');
 check('profileRecord is backend scoped', Mirror::profileRecord(2) === null);
+
+// dayWindow must resolve the user's profile timezone (UTC+8), not the host
+// clock: a regression here silently replayed historical days in UTC.
+[$dayStartMs, $dayEndMs] = ReadingService::dayWindow('2026-11-14', 'alice', 1);
+check('dayWindow honours the profile timezone', gmdate('Y-m-d H:i', (int)($dayStartMs / 1000)) === '2026-11-13 16:00');
+check('dayWindow covers exactly one local day', gmdate('Y-m-d H:i', (int)($dayEndMs / 1000)) === '2026-11-14 16:00');
+[$utcStartMs, ] = ReadingService::dayWindow('2026-11-14', 'nobody', 1);
+check('dayWindow falls back to UTC without a profile', gmdate('Y-m-d H:i', (int)($utcStartMs / 1000)) === '2026-11-14 00:00');
 
 $pdo->prepare(
     'INSERT INTO panel_sync_state (user_id, stream, cursor_ms, last_ok_at) VALUES (1, "entries:sgv", ?, ?)'
