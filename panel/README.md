@@ -202,6 +202,24 @@ php bin/sync.php --profiles
 - 迁移在一次 HTTP 请求内同步执行（`set_time_limit(0)`）：账号多或历史长时可能持续数分钟，期间请保持页面打开；浏览器或反代超时导致的中断直接重跑即可——流程幂等，已迁移账号不受影响。
 - 失败账号在结果页逐个显示原因，直接重试即可。
 
+## 面板端 Nightscout 兼容 API
+
+面板在 `/api/v1/…` 下提供与 Nightscout v1 **形状一致的只读端点**，数据读本地镜像（毫秒级，后端掉线仍可读）——第三方工具、CGM 上传器与脚本可以直接把面板当 Nightscout 用：
+
+| 端点 | 说明 | 参数 |
+|------|------|------|
+| `GET /api/v1/entries.json` | 血糖数组，最新在前 | `count`（默认 10，上限 1000，0 → 空数组）、`find[type]=sgv\|mbg`（缺省合并两类）、`find[date][$gte]/[$lt]`（毫秒）、`find[device]`（标量或 `$in`） |
+| `GET /api/v1/treatments.json` | 治疗数组，最新在前 | `count`（默认 100，带 find[] 时 1000）、`find[created_at][$gte]/[$lt]`（ISO 时间） |
+| `GET /api/v1/devicestatus.json` | 数组（镜像每账号只存最新一条，至多 1 个元素） | `count` |
+| `GET /api/v1/profile.json` | 档案记录数组，`store` 只含调用者自己的条目 | `count` |
+| `GET /api/v1/profile/current` | 当前档案单对象（同上投影） | — |
+| `GET /api/v1/status.json` | 面板状态（形状与 NS status.json 对齐） | — |
+
+- **鉴权**：面板登录会话，或 `api-secret: <accessToken>` 头（与后端同一个 token，见设置 → 我的 API）。只接受请求头，不接受 `?token=` 查询串。
+- **错误形状与后端一致**：未授权 401 `{status,message:'Unauthorized',description:'Invalid/Missing'}`；未知 `find[]` 过滤键与不受支持的操作符一律 400（fail-closed，不静默忽略）；限流 120 次/分钟（按 IP），超限 429。
+- **条件请求**：entries/treatments 带 `Last-Modified` 头，`If-Modified-Since` 不早于最新记录时回 304。
+- 未安装时所有端点 302 跳转安装器；裸路径与任意后缀（`.json` 等）都可用——面板的 URL 后缀配置允许任意后缀，均以 JSON 应答。写路径不在兼容 API 内——写入仍按上文「我的 API」直连 Nightscout。
+
 ## 功能页
 
 - `/register` 注册 → **选择 Nightscout 后端**（下拉显示友好名称）→ 自动创建 `store[<username>]` + 专属角色（`api:profile:<username>:read/write/create` + 各集合 create）+ subject，页面上直接展示发放的后端、地址与 token；无可用后端时注册关闭

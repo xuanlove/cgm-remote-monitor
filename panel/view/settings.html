@@ -193,6 +193,33 @@
 {* ------------------------------------------------------------- API tab *}
 {elseif condition="$tab === 'api'" /}
   <div class="card">
+    <h1 style="font-size:16px;">{:t('api.panelTitle')}</h1>
+    <p class="hint">{:t_html('api.panelIntro')}</p>
+    <table>
+      <tr><th>{:t('api.panelBase')}</th><td><code>{$panelUrl}/api/v1/</code></td></tr>
+      <tr><th>{:t('api.token')}</th><td><code>{$tokenMask}</code></td></tr>
+    </table>
+    <p class="hint">{:t_html('api.panelPerms')}</p>
+
+    <h1 style="font-size:16px;">{:t('api.panelEntries')}</h1>
+  <pre>curl "{$panelUrl}/api/v1/entries.json?count=100" \
+    -H "api-secret: &lt;{:t('api.token')}&gt;"</pre>
+    <p class="hint">{:t_html('api.panelEntriesHint', ['name' => $user['username']])}</p>
+
+    <h1 style="font-size:16px;">{:t('api.panelTreatments')}</h1>
+  <pre>curl "{$panelUrl}/api/v1/treatments.json?count=100" \
+    -H "api-secret: &lt;{:t('api.token')}&gt;"</pre>
+
+    <h1 style="font-size:16px;">{:t('api.panelProfile')}</h1>
+  <pre>curl "{$panelUrl}/api/v1/profile.json" \
+    -H "api-secret: &lt;{:t('api.token')}&gt;"</pre>
+
+    <h1 style="font-size:16px;">{:t('api.panelStatus')}</h1>
+  <pre>curl "{$panelUrl}/api/v1/status.json" \
+    -H "api-secret: &lt;{:t('api.token')}&gt;"</pre>
+  </div>
+
+  <div class="card">
     <h1 style="font-size:16px;">{:t('api.infoTitle')}</h1>
     <table>
       <tr><th>{:t('api.backend')}</th><td>{$backendName}</td></tr>

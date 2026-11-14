@@ -217,6 +217,15 @@ return [
 
     // --------------------------------------------------------------- myapi
     'api.title' => '我的 API',
+    'api.panelTitle' => '面板端兼容 API（推荐外部工具使用）',
+    'api.panelIntro' => '面板本身提供与 Nightscout 形状一致的只读接口，数据来自本地镜像（毫秒级响应，后端掉线仍可读）。支持 entries / treatments / devicestatus / profile / status 五组端点，count 与 find[type]、find[date][$gte/$lt]、find[created_at][$gte/$lt]、find[device] 参数，超过 120 次/分钟限流。写数据仍按下方 Nightscout 直连方式。',
+    'api.panelBase' => '接口基址',
+    'api.panelPerms' => '与后端共用同一个 token（api-secret 头），只能读到以你用户名为归属的数据——镜像按账号隔离，profile 只返回你自己的档案。',
+    'api.panelEntries' => '读取血糖（面板镜像，最新在前）',
+    'api.panelEntriesHint' => '只返回 :name 名下的记录；find[date][$gte]/[$lt] 按毫秒时间窗过滤；If-Modified-Since 条件请求回 304。',
+    'api.panelTreatments' => '读取治疗记录（面板镜像）',
+    'api.panelProfile' => '读取 Profile（只含你自己的档案）',
+    'api.panelStatus' => '面板状态（同样需要 token）',
     'api.infoTitle' => '你的专属接口信息',
     'api.backend' => '所属后端',
     'api.nsUrl' => 'Nightscout 地址',

@@ -217,6 +217,15 @@ return [
 
     // --------------------------------------------------------------- myapi
     'api.title' => 'My API',
+    'api.panelTitle' => 'Panel-compatible API (recommended for external tools)',
+    'api.panelIntro' => 'The panel itself serves read-only endpoints shaped exactly like Nightscout, backed by the local mirror (millisecond responses that keep working while the backend is down). Entries / treatments / devicestatus / profile / status, with count and find[type], find[date][$gte/$lt], find[created_at][$gte/$lt], find[device] parameters, rate-limited to 120 requests per minute. Writes still go straight to Nightscout as documented below.',
+    'api.panelBase' => 'Base URL',
+    'api.panelPerms' => 'Uses the same token as the backend (api-secret header) and can only read records attributed to your own username — the mirror is per-account, and profile answers just your own store entry.',
+    'api.panelEntries' => 'Read glucose (panel mirror, newest first)',
+    'api.panelEntriesHint' => 'Returns only records attributed to :name; find[date][$gte]/[$lt] filter by a millisecond window; If-Modified-Since conditional requests answer 304.',
+    'api.panelTreatments' => 'Read treatments (panel mirror)',
+    'api.panelProfile' => 'Read profile (only your own store entry)',
+    'api.panelStatus' => 'Panel status (token required as well)',
     'api.infoTitle' => 'Your credentials',
     'api.backend' => 'Backend',
     'api.nsUrl' => 'Nightscout URL',

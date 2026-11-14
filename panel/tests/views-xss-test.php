@@ -252,6 +252,7 @@ $fixtures = [
         'success' => null,
     ],
     'settings:api' => [
+        'panelUrl' => 'https://panel.example.com',
         'nsUrl' => 'http://127.0.0.1:1337',
         'backendName' => 'NS One',
         'token' => 'abcdef1234567890',

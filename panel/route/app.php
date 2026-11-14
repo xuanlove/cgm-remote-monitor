@@ -10,6 +10,7 @@ declare(strict_types=1);
  */
 
 use app\middleware\AdminOnly;
+use app\middleware\ApiAuth;
 use app\middleware\Authenticate;
 use app\middleware\CsrfGuard;
 use app\middleware\GuestOnly;
@@ -95,5 +96,27 @@ Route::group(function () {
         ->middleware(CsrfGuard::class)
         ->middleware(AdminOnly::class);
 })->middleware(Authenticate::class);
+
+// ------------------------------------------------------ NS-compatible API
+// Nightscout-shaped reads from the local mirror: third-party tools point at
+// the panel with the same api-secret token the backend would use. Throttle is
+// declared before ApiAuth, so brute-forcing the token counts against the rate
+// bucket and answers 429 instead of 401 forever. Each path exists with and
+// without the .json suffix, exactly like the backend.
+Route::group(function () {
+    Route::get('api/v1/entries', 'NsApi/entries')->ext('json');
+    Route::get('api/v1/entries', 'NsApi/entries');
+    Route::get('api/v1/treatments', 'NsApi/treatments')->ext('json');
+    Route::get('api/v1/treatments', 'NsApi/treatments');
+    Route::get('api/v1/devicestatus', 'NsApi/devicestatus')->ext('json');
+    Route::get('api/v1/devicestatus', 'NsApi/devicestatus');
+    Route::get('api/v1/profile', 'NsApi/profile')->ext('json');
+    Route::get('api/v1/profile', 'NsApi/profile');
+    Route::get('api/v1/profile/current', 'NsApi/profileCurrent')->ext('json');
+    Route::get('api/v1/profile/current', 'NsApi/profileCurrent');
+    Route::get('api/v1/status', 'NsApi/status')->ext('json');
+    Route::get('api/v1/status', 'NsApi/status');
+})->middleware(Throttle::class, 'api', 120, 60, 'json')
+  ->middleware(ApiAuth::class);
 
 Route::miss('Error/notFound');

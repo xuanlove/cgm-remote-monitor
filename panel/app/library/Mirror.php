@@ -168,6 +168,84 @@ final class Mirror
     }
 
     /**
+     * Nightscout-shaped entries for the compat API: decoded raw payloads,
+     * newest first. A null type merges sgv and mbg; both window bounds are
+     * optional. The limit applies inside the subquery, like rawEntries.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public static function apiEntries(int $userId, ?string $type, ?int $startMs, ?int $endMs, int $limit): array
+    {
+        $limit = max(0, $limit);
+        if ($limit === 0) {
+            return [];
+        }
+        $types = $type !== null ? [$type] : ['sgv', 'mbg'];
+        $placeholders = implode(',', array_fill(0, count($types), '?'));
+        $where = ['user_id = ?', "type IN ($placeholders)"];
+        $params = array_merge([$userId], $types);
+        if ($startMs !== null) {
+            $where[] = 'ts >= ?';
+            $params[] = $startMs;
+        }
+        if ($endMs !== null) {
+            $where[] = 'ts < ?';
+            $params[] = $endMs;
+        }
+        $stmt = Db::pdo()->prepare(
+            'SELECT raw, ts FROM (
+                SELECT raw, ts FROM panel_entries
+                 WHERE ' . implode(' AND ', $where) . '
+                 ORDER BY ts DESC LIMIT ' . $limit . '
+             ) ORDER BY ts DESC'
+        );
+        $stmt->execute($params);
+
+        $out = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $decoded = json_decode((string)$row['raw'], true);
+            if (is_array($decoded)) {
+                $out[] = $decoded;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Nightscout-shaped treatments for the compat API: decoded payloads,
+     * newest first, optional created_at window (canonical ISO strings —
+     * storeTreatment already normalizes the column to that form).
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public static function apiTreatments(int $userId, ?string $startIso, ?string $endIso, int $limit): array
+    {
+        $limit = max(0, $limit);
+        if ($limit === 0) {
+            return [];
+        }
+        $where = ['user_id = ?'];
+        $params = [$userId];
+        if ($startIso !== null) {
+            $where[] = 'created_at >= ?';
+            $params[] = $startIso;
+        }
+        if ($endIso !== null) {
+            $where[] = 'created_at < ?';
+            $params[] = $endIso;
+        }
+        $stmt = Db::pdo()->prepare(
+            'SELECT payload, created_at FROM (
+                SELECT payload, created_at FROM panel_treatments
+                 WHERE ' . implode(' AND ', $where) . '
+                 ORDER BY created_at DESC LIMIT ' . $limit . '
+             ) ORDER BY created_at DESC'
+        );
+        $stmt->execute($params);
+        return self::decodeAll($stmt->fetchAll());
+    }
+
+    /**
      * All cached profile records of one backend, newest first (the first one
      * is active). Profiles are shared per Nightscout backend, so the mirror
      * is keyed by backend, not by user.

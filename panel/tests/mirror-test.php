@@ -93,6 +93,18 @@ check('rawEntries keeps uploader fields', $raw[1]['_id'] === 'e3' && $raw[1]['de
 $mbg = Mirror::rawEntries(1, 'mbg', $now - 3600000, $now + 60000);
 check('rawEntries filters by type', count($mbg) === 1 && $mbg[0]['mbg'] === 140);
 
+// NS-compat API reads: newest-first, windows, limits, sgv+mbg merged.
+$api = Mirror::apiEntries(1, null, null, null, 10);
+check('apiEntries merges sgv and mbg', count($api) === 5);
+// m1 and e3 share the newest ts, so their mutual order is a tie-break; the
+// older records must trail in strict order.
+check('apiEntries is newest first', in_array($api[0]['_id'], ['m1', 'e3'], true) && in_array($api[1]['_id'], ['m1', 'e3'], true) && [$api[2]['_id'], $api[3]['_id'], $api[4]['_id']] === ['e2', 'e1', 'e-old']);
+check('apiEntries filters by type', count(Mirror::apiEntries(1, 'sgv', null, null, 10)) === 4 && Mirror::apiEntries(1, 'sgv', null, null, 10)[0]['_id'] === 'e3');
+$limited = Mirror::apiEntries(1, null, null, null, 2);
+check('apiEntries honours the limit', count($limited) === 2 && in_array('e3', [$limited[0]['_id'], $limited[1]['_id']], true) && in_array('m1', [$limited[0]['_id'], $limited[1]['_id']], true));
+check('apiEntries honours the window', count(Mirror::apiEntries(1, null, $now - 500000, $now + 60000, 10)) === 3);
+check('apiEntries answers nothing for count 0', Mirror::apiEntries(1, null, null, null, 0) === []);
+
 $treat = static fn(string $id, string $at, string $type): array => [
     1, $id, $at, $type, json_encode(['_id' => $id, 'created_at' => $at, 'eventType' => $type, 'enteredBy' => 'alice']),
 ];
@@ -107,6 +119,9 @@ check('recentTreatments is newest first', $recent[0]['_id'] === 't2');
 check('treatmentsBetween covers the range', count(Mirror::treatmentsBetween(1, $now - 7200000, $now + 60000)) === 2);
 check('treatmentById returns the payload', Mirror::treatmentById(1, 't1')['eventType'] === 'Carbs');
 check('treatmentById is user scoped', Mirror::treatmentById(2, 't1') === null);
+$apiT = Mirror::apiTreatments(1, null, null, 10);
+check('apiTreatments is newest first', $apiT[0]['_id'] === 't2');
+check('apiTreatments honours the window', count(Mirror::apiTreatments(1, gmdate('c', (int)($now / 1000) - 1800), null, 10)) === 1 && Mirror::apiTreatments(1, null, null, 10)[1]['_id'] === 't1');
 
 $pdo->prepare(
     'INSERT INTO panel_devicestatus (user_id, ns_id, ts, payload) VALUES (1, "d1", ?, ?)'
