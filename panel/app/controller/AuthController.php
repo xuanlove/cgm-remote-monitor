@@ -5,6 +5,7 @@ namespace app\controller;
 
 use app\service\UserService;
 use NightPanel\Auth;
+use NightPanel\Backends;
 use think\Request;
 use think\Response;
 
@@ -48,7 +49,12 @@ class AuthController extends BaseController
 
     public function registerPage(): Response
     {
-        return $this->render('register', ['error' => null, 'success' => null, 'info' => null]);
+        return $this->render('register', [
+            'error' => null,
+            'success' => null,
+            'info' => null,
+            'backends' => Backends::enabled(),
+        ]);
     }
 
     public function register(Request $request): Response
@@ -58,18 +64,30 @@ class AuthController extends BaseController
                 'error' => t('register.tooMany'),
                 'success' => null,
                 'info' => null,
+                'backends' => Backends::enabled(),
             ]);
         }
 
         [$error, $info] = UserService::register(
             (string)$request->post('username', ''),
-            (string)$request->post('password', '')
+            (string)$request->post('password', ''),
+            (int)$request->post('backend', 0)
         );
 
         if ($error !== null) {
-            return $this->render('register', ['error' => $error, 'success' => null, 'info' => null]);
+            return $this->render('register', [
+                'error' => $error,
+                'success' => null,
+                'info' => null,
+                'backends' => Backends::enabled(),
+            ]);
         }
 
-        return $this->render('register', ['error' => null, 'success' => true, 'info' => $info]);
+        return $this->render('register', [
+            'error' => null,
+            'success' => true,
+            'info' => $info,
+            'backends' => Backends::enabled(),
+        ]);
     }
 }

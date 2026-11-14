@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 namespace app\service;
 
-use NightPanel\NsConfig;
+use NightPanel\Backends;
 use NightPanel\NsException;
 use NightPanel\NsClient;
 
@@ -18,12 +18,17 @@ use NightPanel\NsClient;
 final class UserProvisioner
 {
     /**
+     * The caller picks the backend: registration passes the one the new user
+     * chose, migration passes the target backend. Migration also hands over
+     * the profile store entry carried over from the source backend, so the
+     * rebuilt account keeps its treatment settings instead of starting from
+     * the default template.
+     *
+     * @param array<string,mixed>|null $profileOverride
      * @return array{subjectId:string,roleName:string,token:string}
      */
-    public static function provision(string $username): array
+    public static function provision(string $username, NsClient $client, ?array $profileOverride = null): array
     {
-        $client = NsConfig::client();
-
         $roleName = $username . '-profile';
         $permissions = [
             'api:profile:' . $username . ':read',
@@ -54,7 +59,10 @@ final class UserProvisioner
         $token = (string)$subject['accessToken'];
 
         $record = $client->currentProfileRecord();
-        $own = self::defaultProfileTemplate();
+        $own = $profileOverride ?? self::defaultProfileTemplate();
+        // A carried-over profile always overwrites: it is the source backend's
+        // truth. The default template is only written when the entry is new,
+        // so two registrations cannot clobber each other.
         $alreadyThere = $record !== null && isset($record['store'][$username]);
 
         if ($record === null) {
@@ -64,7 +72,7 @@ final class UserProvisioner
                 'defaultProfile' => $username,
                 'startDate' => gmdate('c'),
             ], $token);
-        } elseif (!$alreadyThere) {
+        } elseif (!$alreadyThere || $profileOverride !== null) {
             $client->requestOrThrow('PUT', '/api/v1/profile.json', [
                 '_id' => (string)$record['_id'],
                 'store' => [$username => $own],
@@ -79,9 +87,8 @@ final class UserProvisioner
     }
 
     /** Undo a provisioning run whose local insert failed. */
-    public static function rollback(array $provisioned): void
+    public static function rollback(array $provisioned, NsClient $client): void
     {
-        $client = NsConfig::client();
         try {
             $client->deleteSubject((string)$provisioned['subjectId']);
         } catch (NsException $e) {
@@ -94,10 +101,10 @@ final class UserProvisioner
         }
     }
 
-    /** Remove the Nightscout side of a deleted account. */
+    /** Remove the Nightscout side of a deleted account (its own backend). */
     public static function revoke(array $user): void
     {
-        $client = NsConfig::client();
+        $client = Backends::clientFor((int)($user['backend_id'] ?? 0));
         if (!empty($user['ns_subject_id'])) {
             try {
                 $client->deleteSubject((string)$user['ns_subject_id']);

@@ -38,7 +38,7 @@ class DataController extends BaseController
         }
 
         try {
-            $profileRecord = ProfileService::record();
+            $profileRecord = ProfileService::record($user);
         } catch (NsException $e) {
             // Mirror-only mode: a cold start with Nightscout down still renders
             // whatever has been synced so far.

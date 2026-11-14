@@ -62,6 +62,17 @@ final class Lang
             }
         }
 
+        // The installer writes the site default into panel_settings.
+        try {
+            $stored = Db::setting('default_lang');
+            if ($stored !== null && isset(self::available()[$stored])) {
+                self::$locale = $stored;
+                return self::$locale;
+            }
+        } catch (\Throwable $preInstall) {
+            // Not installed yet: the hardcoded default is fine.
+        }
+
         self::$locale = self::DEFAULT_LOCALE;
         return self::$locale;
     }

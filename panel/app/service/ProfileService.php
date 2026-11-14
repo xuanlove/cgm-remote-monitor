@@ -4,41 +4,49 @@ declare(strict_types=1);
 namespace app\service;
 
 use NightPanel\Auth;
+use NightPanel\Backends;
 use NightPanel\Lang;
 use NightPanel\Mirror;
-use NightPanel\NsConfig;
+use NightPanel\NsClient;
 use NightPanel\NsException;
 use NightPanel\Sync;
 
 /**
- * Nightscout profiles: the shared store document, the signed-in user's entry,
- * and the versioned plans built out of older records.
+ * Nightscout profiles: the shared store document on the user's backend, the
+ * signed-in user's entry, and the versioned plans built out of older records.
  */
 final class ProfileService
 {
+    /** The Nightscout client of the user's backend. */
+    private static function client(array $user): NsClient
+    {
+        return Backends::clientFor((int)($user['backend_id'] ?? 0));
+    }
+
     /**
-     * All profile records, newest first. Reads stay mirror-first: a page load
-     * must not block on Nightscout, and the mirror survives an outage.
+     * All profile records of the user's backend, newest first. Reads stay
+     * mirror-first: a page load must not block on Nightscout, and the mirror
+     * survives an outage.
      *
      * @return array<int,array<string,mixed>>
      */
-    public static function records(): array
+    public static function records(array $user): array
     {
-        $records = Mirror::profiles();
+        $records = Mirror::profiles((int)($user['backend_id'] ?? 0));
         if ($records !== []) {
             return $records;
         }
-        return NsConfig::client()->profiles();
+        return self::client($user)->profiles();
     }
 
     /** The profile record currently in effect. */
-    public static function record(): ?array
+    public static function record(array $user): ?array
     {
-        $record = Mirror::profileRecord();
+        $record = Mirror::profileRecord((int)($user['backend_id'] ?? 0));
         if ($record !== null) {
             return $record;
         }
-        return NsConfig::client()->currentProfileRecord();
+        return self::client($user)->currentProfileRecord();
     }
 
     /**
@@ -50,22 +58,22 @@ final class ProfileService
      *
      * @return array<int,array<string,mixed>>
      */
-    public static function recordsLive(): array
+    public static function recordsLive(array $user): array
     {
-        return NsConfig::client()->profiles();
+        return self::client($user)->profiles();
     }
 
     /** The live current record, for write paths. */
-    public static function recordLive(): ?array
+    public static function recordLive(array $user): ?array
     {
-        return NsConfig::client()->currentProfileRecord();
+        return self::client($user)->currentProfileRecord();
     }
 
     /** The signed-in user's own store entry, or null. */
     public static function forUser(array $user): ?array
     {
         try {
-            $record = self::record();
+            $record = self::record($user);
         } catch (NsException $e) {
             return null;
         }
@@ -90,10 +98,11 @@ final class ProfileService
      *
      * @return array<int,array<string,mixed>>
      */
-    public static function plans(string $username): array
+    public static function plans(array $user): array
     {
+        $username = (string)$user['username'];
         $plans = [];
-        foreach (self::records() as $index => $record) {
+        foreach (self::records($user) as $index => $record) {
             if (!isset($record['store'][$username])) {
                 continue;
             }
@@ -148,7 +157,7 @@ final class ProfileService
      */
     public static function saveOwn(array $user, array $post): array
     {
-        $record = self::recordLive();
+        $record = self::recordLive($user);
         if ($record === null || !isset($record['store'][$user['username']])) {
             throw new NsException('Profile record missing');
         }
@@ -163,12 +172,12 @@ final class ProfileService
         $own['timezone'] = trim((string)($post['timezone'] ?? 'UTC'));
         $own['units'] = 'mg/dl';
 
-        NsConfig::client()->requestOrThrow('PUT', '/api/v1/profile.json', [
+        self::client($user)->requestOrThrow('PUT', '/api/v1/profile.json', [
             '_id' => (string)$record['_id'],
             'store' => [$user['username'] => $own],
         ], Auth::userToken($user));
 
-        self::refreshSnapshot();
+        self::refreshSnapshot($user);
 
         return $own;
     }
@@ -176,7 +185,7 @@ final class ProfileService
     /** Make an older record the active plan. */
     public static function activate(array $user, string $planId): void
     {
-        $records = self::recordsLive();
+        $records = self::recordsLive($user);
         $source = null;
         foreach ($records as $record) {
             if ((string)$record['_id'] === $planId) {
@@ -197,19 +206,19 @@ final class ProfileService
         $store = is_array($active['store'] ?? null) ? $active['store'] : [];
         $store[$user['username']] = $source['store'][$user['username']];
 
-        NsConfig::client()->requestOrThrow('POST', '/api/v1/profile.json', [
+        self::client($user)->requestOrThrow('POST', '/api/v1/profile.json', [
             'store' => $store,
             'defaultProfile' => $active['defaultProfile'] ?? $user['username'],
             'startDate' => gmdate('c'),
         ]);
 
-        self::refreshSnapshot();
+        self::refreshSnapshot($user);
     }
 
     /** Delete a plan record that only belongs to this user. */
     public static function deletePlan(array $user, string $planId): void
     {
-        $records = self::recordsLive();
+        $records = self::recordsLive($user);
         $target = null;
         $index = -1;
         foreach ($records as $i => $record) {
@@ -233,15 +242,15 @@ final class ProfileService
             throw new \InvalidArgumentException(Lang::t('val.planActive'));
         }
 
-        NsConfig::client()->requestOrThrow('DELETE', '/api/v1/profile/' . rawurlencode($planId));
-        self::refreshSnapshot();
+        self::client($user)->requestOrThrow('DELETE', '/api/v1/profile/' . rawurlencode($planId));
+        self::refreshSnapshot($user);
     }
 
-    /** Refresh the shared profile snapshot after a profile write. */
-    public static function refreshSnapshot(): void
+    /** Refresh the profile snapshot of the user's backend after a write. */
+    public static function refreshSnapshot(array $user): void
     {
         try {
-            (new Sync(NsConfig::client()))->profiles();
+            (new Sync(self::client($user), (int)($user['backend_id'] ?? 0)))->profiles();
         } catch (\Throwable $e) {
             // ignore: the scheduled run is the safety net
         }

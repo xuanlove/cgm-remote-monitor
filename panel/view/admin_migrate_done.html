@@ -1,0 +1,44 @@
+{extend name="layout/base" /}
+{block name="content"}
+<div class="card">
+  <h1>{:t('admin.migrateDoneTitle')}</h1>
+  <p class="hint">{:t_html('admin.migrateDoneRoute', ['from' => $from['name'], 'to' => $to['name']])}
+    {if condition="$cleanup"} · {:t('admin.migrateCleanupOn')}{/if}</p>
+
+  <table>
+    <thead><tr>
+      <th>{:t('adm.col.username')}</th>
+      <th>{:t('admin.migrateResult')}</th>
+      <th>{:t('admin.migrateDetail')}</th>
+    </tr></thead>
+    <tbody>
+    {foreach $results as $r}
+      <tr>
+        <td><code>{$r.username}</code></td>
+        <td>
+          {if condition="$r['ok']"}<span class="msg-ok">{:t('admin.migrateUserOk')}</span>
+          {else /}<span class="msg-bad">{:t('admin.migrateUserFailed')}</span>{/if}
+        </td>
+        <td>
+          {if condition="$r['ok']"}
+            {:t_html('admin.migrateCounts', [
+              'entries' => $r['entries'],
+              'treatments' => $r['treatments'],
+              'devicestatus' => $r['devicestatus'],
+            ])}
+            {if condition="!empty($r['cleanupError'])"}
+              <br><span class="msg-bad">{:t_html('admin.migrateCleanupFailed', ['msg' => $r['cleanupError']])}</span>
+            {/if}
+          {else /}
+            <span class="msg-bad">{$r.error}</span>
+          {/if}
+        </td>
+      </tr>
+    {/foreach}
+    </tbody>
+  </table>
+
+  <p class="hint">{:t('admin.migrateRetryHint')}</p>
+  <p><a href="/admin/users">{:t('admin.migrateBack')}</a></p>
+</div>
+{/block}

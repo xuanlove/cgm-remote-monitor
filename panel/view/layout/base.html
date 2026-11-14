@@ -46,12 +46,8 @@
   {notempty name="user"}
     <a href="/dashboard">{:t('nav.dashboard')}</a>
     <a href="/reports">{:t('nav.reports')}</a>
-    <a href="/profile">{:t('nav.profile')}</a>
-    <a href="/profile/plans">{:t('nav.plans')}</a>
-    <a href="/entry">{:t('nav.entry')}</a>
     <a href="/treatments">{:t('nav.treatments')}</a>
-    <a href="/settings/alerts">{:t('nav.alerts')}</a>
-    <a href="/myapi">{:t('nav.myapi')}</a>
+    <a href="/profile">{:t('nav.settings')}</a>
     {if condition="$isAdmin"}<a href="/admin/users">{:t('nav.admin')}</a>{/if}
     <span class="right">{$user.username} ·
       <form method="post" action="/logout" style="display:inline;margin:0;">

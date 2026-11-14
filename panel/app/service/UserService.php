@@ -3,8 +3,10 @@ declare(strict_types=1);
 
 namespace app\service;
 
+use NightPanel\Backends;
 use NightPanel\Db;
 use NightPanel\Lang;
+use NightPanel\NsException;
 
 /**
  * Panel accounts: lookup, validation, registration and deletion.
@@ -26,11 +28,12 @@ final class UserService
     }
 
     /**
-     * Validate and create an account, provisioning the Nightscout side first.
+     * Validate and create an account on the chosen backend, provisioning the
+     * Nightscout side first.
      *
-     * @return array{0:?string,1:?array{username:string,nsUrl:string,token:string}} error and success payload
+     * @return array{0:?string,1:?array{username:string,backendName:string,nsUrl:string,token:string}} error and success payload
      */
-    public static function register(string $username, string $password): array
+    public static function register(string $username, string $password, int $backendId): array
     {
         $username = strtolower(trim($username));
 
@@ -44,17 +47,34 @@ final class UserService
             return [Lang::t('val.usernameTaken'), null];
         }
 
-        $provisioned = UserProvisioner::provision($username);
+        $backend = null;
+        foreach (Backends::enabled() as $row) {
+            if ((int)$row['id'] === $backendId) {
+                $backend = $row;
+                break;
+            }
+        }
+        if ($backend === null) {
+            return [Lang::t('val.backendUnavailable'), null];
+        }
+
+        $client = Backends::clientFor($backend);
+        try {
+            $provisioned = UserProvisioner::provision($username, $client);
+        } catch (NsException $e) {
+            return [$e->getMessage(), null];
+        }
 
         $stmt = Db::pdo()->prepare(
-            'INSERT INTO panel_users (username, password_hash, role, ns_subject_id, ns_role_name, ns_access_token_enc)
-             VALUES (?, ?, "user", ?, ?, ?)'
+            'INSERT INTO panel_users (username, password_hash, role, backend_id, ns_subject_id, ns_role_name, ns_access_token_enc)
+             VALUES (?, ?, "user", ?, ?, ?, ?)'
         );
 
         try {
             $stmt->execute([
                 $username,
                 password_hash($password, PASSWORD_DEFAULT),
+                $backendId,
                 $provisioned['subjectId'],
                 $provisioned['roleName'],
                 Db::encrypt($provisioned['token']),
@@ -63,13 +83,14 @@ final class UserService
             // Two registrations can pass find() at once; the unique index picks
             // a winner. Undo the loser's Nightscout subject and role so no
             // orphan grant is left behind.
-            UserProvisioner::rollback($provisioned);
+            UserProvisioner::rollback($provisioned, $client);
             return [Lang::t('val.usernameTaken'), null];
         }
 
         return [null, [
             'username' => $username,
-            'nsUrl' => \NightPanel\NsConfig::baseUrl(),
+            'backendName' => (string)$backend['name'],
+            'nsUrl' => (string)$backend['url'],
             'token' => $provisioned['token'],
         ]];
     }

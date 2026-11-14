@@ -2,6 +2,13 @@
 {block name="content"}
 <h1>{:t('dash.title')} <span class="hint" style="font-size:13px;">· {:t_html('dash.owner', ['name' => $user['username']])}</span></h1>
 
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;">
+  <a href="/entry" style="padding:8px 16px;border-radius:8px;background:var(--accent);color:#fff;text-decoration:none;font-size:14px;">+ {:t('nav.entry')}</a>
+  <a href="/reports" style="padding:8px 16px;border-radius:8px;border:1px solid var(--line);color:var(--fg);text-decoration:none;font-size:14px;">{:t('nav.reports')}</a>
+  <a href="/treatments" style="padding:8px 16px;border-radius:8px;border:1px solid var(--line);color:var(--fg);text-decoration:none;font-size:14px;">{:t('nav.treatments')}</a>
+  <a href="/profile" style="padding:8px 16px;border-radius:8px;border:1px solid var(--line);color:var(--fg);text-decoration:none;font-size:14px;">{:t('nav.settings')}</a>
+</div>
+
 <div id="alertBanner" style="display:none;padding:10px 16px;border-radius:10px;margin-bottom:16px;font-weight:600;"></div>
 
 <div class="card">

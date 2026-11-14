@@ -11,7 +11,7 @@ final class Db
     private static ?\PDO $pdo = null;
 
     /** Bump when a migration step is added; stored in `PRAGMA user_version`. */
-    private const SCHEMA_VERSION = 1;
+    private const SCHEMA_VERSION = 2;
 
     /** The resolved database file, so callers can place locks next to it. */
     public static function file(): string
@@ -26,8 +26,9 @@ final class Db
             if (!is_dir($dir)) {
                 mkdir($dir, 0770, true);
             }
-            // PANEL_DB lets deployments (and tests) point at another file; the
-            // default lives next to the code so a checkout runs out of the box.
+            // The database file holds the key seed, so keep it private to the
+            // web/CLI user even on a default umask.
+            $existed = is_file(self::file());
             self::$pdo = new \PDO('sqlite:' . self::file());
             self::$pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
             self::$pdo->setAttribute(\PDO::ATTR_DEFAULT_FETCH_MODE, \PDO::FETCH_ASSOC);
@@ -37,23 +38,64 @@ final class Db
             self::$pdo->exec('PRAGMA busy_timeout = 5000');
             self::$pdo->exec('PRAGMA synchronous = NORMAL');
             self::$pdo->exec('PRAGMA foreign_keys = ON');
-            self::migrate();
+            try {
+                self::migrate();
+            } catch (\Throwable $e) {
+                // A half-opened handle (e.g. a legacy database was refused)
+                // must not be reused by the next caller, skipping the check.
+                self::$pdo = null;
+                throw $e;
+            }
+            if (!$existed) {
+                @chmod(self::file(), 0600);
+                @chmod(self::file() . '-wal', 0600);
+                @chmod(self::file() . '-shm', 0600);
+            }
         }
         return self::$pdo;
     }
 
     private static function migrate(): void
     {
+        $version = (int)self::$pdo->query('PRAGMA user_version')->fetchColumn();
+        if ($version > self::SCHEMA_VERSION) {
+            throw new \RuntimeException(
+                'Panel database schema ' . $version . ' is newer than this code (' . self::SCHEMA_VERSION . ')'
+            );
+        }
+        if ($version === self::SCHEMA_VERSION) {
+            return;
+        }
+        // This release installs fresh only: there is no v1 -> v2 upgrade path.
+        if ($version >= 1) {
+            throw new \RuntimeException(
+                'Legacy panel database found (schema v' . $version . '). '
+                . 'Back up and remove data/panel.db, then open install.php to reinstall.'
+            );
+        }
+
+        self::$pdo->exec(
+            'CREATE TABLE IF NOT EXISTS panel_ns_backends (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                url TEXT NOT NULL,
+                secret_enc TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )'
+        );
         self::$pdo->exec(
             'CREATE TABLE IF NOT EXISTS panel_users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT NOT NULL UNIQUE COLLATE NOCASE,
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT "user",
+                backend_id INTEGER,
                 ns_subject_id TEXT,
                 ns_role_name TEXT,
                 ns_access_token_enc TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (backend_id) REFERENCES panel_ns_backends(id)
             )'
         );
         self::$pdo->exec(
@@ -130,10 +172,12 @@ final class Db
         );
         self::$pdo->exec(
             'CREATE TABLE IF NOT EXISTS panel_profiles (
-                ns_id TEXT PRIMARY KEY,
+                backend_id INTEGER NOT NULL,
+                ns_id TEXT NOT NULL,
                 start_date TEXT,
                 payload TEXT NOT NULL,
-                fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                fetched_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (backend_id, ns_id)
             )'
         );
         self::$pdo->exec(
@@ -176,20 +220,10 @@ final class Db
                 ON panel_alert_events (user_id, delivered, ts)'
         );
 
-        // Refuse to run against a database written by a newer release, and
-        // stamp the current schema on a fresh (or upgraded) file.
-        $version = (int)self::$pdo->query('PRAGMA user_version')->fetchColumn();
-        if ($version > self::SCHEMA_VERSION) {
-            throw new \RuntimeException(
-                'Panel database schema ' . $version . ' is newer than this code (' . self::SCHEMA_VERSION . ')'
-            );
-        }
-        if ($version < self::SCHEMA_VERSION) {
-            self::$pdo->exec('PRAGMA user_version = ' . self::SCHEMA_VERSION);
-        }
+        self::$pdo->exec('PRAGMA user_version = ' . self::SCHEMA_VERSION);
     }
 
-    /** Encrypt a secret for storage; the key comes from the environment. */
+    /** Encrypt a secret for storage; the master seed lives in panel_settings. */
     public static function encrypt(string $plaintext): string
     {
         $key = self::encryptionKey();
@@ -208,69 +242,39 @@ final class Db
         $tag = substr($raw, 16, 16);
         $cipher = substr($raw, 32);
 
-        // Ciphertexts written before the move to app/library use a salt that
-        // embedded the old file path; try both so an upgrade does not strand
-        // existing tokens. New writes only ever use the first key.
-        foreach (self::keys() as $key) {
-            $plain = openssl_decrypt($cipher, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
-            if ($plain !== false) {
-                return $plain;
-            }
+        $plain = openssl_decrypt($cipher, 'aes-256-gcm', self::encryptionKey(), OPENSSL_RAW_DATA, $iv, $tag);
+        if ($plain === false) {
+            throw new \RuntimeException('Decryption failed');
         }
-        throw new \RuntimeException('Decryption failed');
+        return $plain;
     }
 
-    /**
-     * Candidate keys, newest first. The environment key wins outright; the
-     * fallback derives one stable key plus the legacy path-based one.
-     *
-     * @return array<int,string>
-     */
+    /** The single key, derived from the in-database seed. */
     private static function keys(): array
     {
-        $env = getenv('PANEL_SECRET_KEY');
-        if ($env !== false && $env !== '') {
-            return [hash('sha256', $env, true)];
-        }
-
-        $seed = self::keySeed();
-        return [
-            // Stable across installations and refactors: no file path involved.
-            hash('sha256', 'night-panel|db-v1|' . $seed, true),
-            // Pre-refactor derivation (<panel>/lib/Db.php used __FILE__).
-            hash('sha256', dirname(__DIR__, 2) . '/lib/Db.php' . '|night-panel|' . $seed, true),
-        ];
+        return [self::encryptionKey()];
     }
 
     /** The key used for new ciphertext. */
     private static function encryptionKey(): string
     {
-        return self::keys()[0];
+        return hash('sha256', 'night-panel|db-v2|' . self::keySeed(), true);
     }
 
-    /** Read (or create) the on-disk key seed; migrates the old in-DB seed. */
+    /**
+     * Resolve the key seed from panel_settings. The installer pre-writes it;
+     * a missing row (database created outside the installer) is generated
+     * and stored on first use so the panel is self-healing.
+     */
     private static function keySeed(): string
     {
-        $file = self::file() . '.key';
-        if (is_file($file)) {
-            $seed = trim((string)file_get_contents($file));
-            if ($seed !== '') {
-                return $seed;
-            }
+        $seed = self::setting('key_seed');
+        if ($seed !== null && $seed !== '') {
+            return $seed;
         }
 
-        // An installation upgraded from an earlier release still has the seed
-        // in the settings table. Adopt it so existing ciphertexts stay readable,
-        // then remove the in-database copy.
-        $legacy = self::setting('key_seed');
-        $seed = ($legacy !== null && $legacy !== '') ? $legacy : bin2hex(random_bytes(32));
-
-        if (@file_put_contents($file, $seed . "\n", LOCK_EX) !== false) {
-            @chmod($file, 0600);
-            if ($legacy !== null) {
-                self::pdo()->prepare('DELETE FROM panel_settings WHERE key = ?')->execute(['key_seed']);
-            }
-        }
+        $seed = bin2hex(random_bytes(32));
+        self::setSetting('key_seed', $seed);
         return $seed;
     }
 
@@ -291,39 +295,8 @@ final class Db
         $stmt->execute([$key, $value]);
     }
 
-    /** Marker that separates encrypted values from pre-encryption plaintext. */
-    private const SECRET_PREFIX = 'enc:v1:';
-
-    /**
-     * Read a secret setting (e.g. the Nightscout admin secret). Values written
-     * before encryption was introduced are plaintext and are still returned, so
-     * an existing installation keeps working until the next save.
-     */
-    public static function secret(string $key): ?string
-    {
-        $value = self::setting($key);
-        if ($value === null || $value === '') {
-            return null;
-        }
-        if (!str_starts_with($value, self::SECRET_PREFIX)) {
-            return $value;
-        }
-        try {
-            return self::decrypt(substr($value, strlen(self::SECRET_PREFIX)));
-        } catch (\RuntimeException $e) {
-            throw new \RuntimeException(
-                'Cannot decrypt ' . $key . '; PANEL_SECRET_KEY was probably changed. Re-enter the value.',
-                0,
-                $e
-            );
-        }
-    }
-
-    /** Encrypt a secret setting at rest. */
-    public static function setSecret(string $key, string $value): void
-    {
-        self::setSetting($key, self::SECRET_PREFIX . self::encrypt($value));
-    }
+    /** Marker that separates encrypted values from plaintext. */
+    public const SECRET_PREFIX = 'enc:v1:';
 
     /**
      * Count one attempt in a fixed window; false once the allowance is used up.

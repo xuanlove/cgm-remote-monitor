@@ -148,6 +148,28 @@ final class NsClient
         $this->requestOrThrow('DELETE', '/api/v2/authorization/subjects/' . rawurlencode($subjectId));
     }
 
+    /** Every subject document (id, name, roles, accessToken). */
+    public function subjects(): array
+    {
+        $body = $this->requestOrThrow('GET', '/api/v2/authorization/subjects');
+        return is_array($body) ? $body : [];
+    }
+
+    /**
+     * Delete a subject addressed by name, if it exists. Migration uses this
+     * to rebuild a same-name subject on the target backend: the panel is the
+     * source of truth for who owns the name.
+     */
+    public function deleteSubjectByName(string $name): void
+    {
+        foreach ($this->subjects() as $subject) {
+            if (($subject['name'] ?? null) === $name && !empty($subject['_id'])) {
+                $this->deleteSubject((string)$subject['_id']);
+                return;
+            }
+        }
+    }
+
     /** Remove the per-user role, addressed by name (Nightscout deletes by id). */
     public function deleteRoleByName(string $name): void
     {
@@ -164,6 +186,101 @@ final class NsClient
                 return;
             }
         }
+    }
+
+    /**
+     * Entries of every type for one device, newest first, back to the dawn
+     * of time. Used by backend migration to walk the full history.
+     */
+    public function entriesBefore(string $device, int $beforeMs, int $count = 1500): array
+    {
+        $path = '/api/v1/entries.json?count=' . $count
+            . '&find[device]=' . rawurlencode($device)
+            . ($beforeMs > 0 ? '&find[date][$lt]=' . $beforeMs : '');
+        $body = $this->requestOrThrow('GET', $path);
+        return is_array($body) ? $body : [];
+    }
+
+    /** Treatments of one user, newest first, created before an ISO timestamp. */
+    public function treatmentsBefore(string $enteredBy, string $beforeIso, int $count = 1000): array
+    {
+        $filter = '&find[enteredBy]=' . rawurlencode($enteredBy)
+            . ($beforeIso !== '' ? '&find[created_at][$lt]=' . rawurlencode($beforeIso) : '');
+        return $this->treatmentQuery($filter, $count);
+    }
+
+    /**
+     * devicestatus records of one device, newest first, created before an ISO
+     * timestamp. The collection keys on the created_at string (not a ms
+     * epoch), so the migration cursor compares raw strings.
+     */
+    public function deviceStatusBefore(string $device, string $beforeIso, int $count = 1000): array
+    {
+        $path = '/api/v1/devicestatus.json?count=' . $count
+            . '&find[device]=' . rawurlencode($device)
+            . ($beforeIso !== '' ? '&find[created_at][$lt]=' . rawurlencode($beforeIso) : '');
+        $body = $this->requestOrThrow('GET', $path);
+        return is_array($body) ? $body : [];
+    }
+
+    /** Bulk-write entries, keeping the original date/device fields. */
+    public function bulkPostEntries(array $entries): void
+    {
+        if ($entries !== []) {
+            $this->requestOrThrow('POST', '/api/v1/entries.json', array_values($entries));
+        }
+    }
+
+    /** Bulk-write treatments, keeping created_at/enteredBy. */
+    public function bulkPostTreatments(array $treatments): void
+    {
+        if ($treatments !== []) {
+            $this->requestOrThrow('POST', '/api/v1/treatments.json', array_values($treatments));
+        }
+    }
+
+    /** Bulk-write devicestatus records. */
+    public function bulkPostDeviceStatus(array $records): void
+    {
+        if ($records !== []) {
+            $this->requestOrThrow('POST', '/api/v1/devicestatus.json', array_values($records));
+        }
+    }
+
+    /** Delete every entry of a device (source cleanup after migration). */
+    public function deleteEntriesByDevice(string $device): void
+    {
+        $this->requestOrThrow(
+            'DELETE',
+            '/api/v1/entries/find[device]=' . rawurlencode($device),
+            null,
+            null,
+            [200, 204]
+        );
+    }
+
+    /** Delete every treatment of one user (source cleanup). */
+    public function deleteTreatmentsByEnteredBy(string $enteredBy): void
+    {
+        $this->requestOrThrow(
+            'DELETE',
+            '/api/v1/treatments/find[enteredBy]=' . rawurlencode($enteredBy),
+            null,
+            null,
+            [200, 204]
+        );
+    }
+
+    /** Delete every devicestatus record of a device (source cleanup). */
+    public function deleteDeviceStatusByDevice(string $device): void
+    {
+        $this->requestOrThrow(
+            'DELETE',
+            '/api/v1/devicestatus/find[device]=' . rawurlencode($device),
+            null,
+            null,
+            [200, 204]
+        );
     }
 
     /** CGM entries for one device attribution. */

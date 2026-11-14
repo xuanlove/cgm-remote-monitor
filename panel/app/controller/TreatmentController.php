@@ -36,7 +36,7 @@ class TreatmentController extends BaseController
 
         // Live read: sending back a snapshot could revert fields that changed
         // elsewhere since the last sync.
-        $existing = TreatmentService::findLive((string)$request->post('_id', ''));
+        $existing = TreatmentService::findLive($user, (string)$request->post('_id', ''));
 
         if ($existing === null || !TreatmentService::owned($existing, $user)) {
             return $this->render('treatments', $this->vars($user, null, t('val.notOwner'), null), 403);
@@ -63,7 +63,7 @@ class TreatmentController extends BaseController
         $user = PanelContext::requireUser();
         $id = (string)$request->post('_id', '');
 
-        $existing = TreatmentService::findLive($id);
+        $existing = TreatmentService::findLive($user, $id);
         if ($existing !== null) {
             TreatmentService::delete($user, $id, $existing);
         }

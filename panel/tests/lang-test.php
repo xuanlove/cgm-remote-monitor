@@ -145,7 +145,7 @@ check('t() translates after switching', Lang::t('nav.dashboard') === 'Dashboard'
 check('t() replaces placeholders', Lang::t('dash.lastHours', ['n' => 6]) === 'Last 6 hours');
 check('unknown locale is refused', Lang::set('fr') === false && Lang::current() === 'en');
 Lang::set('zh_cn');
-check('t() falls back to the active locale value', Lang::t('nav.dashboard') === '仪表盘');
+check('t() falls back to the active locale value', Lang::t('nav.dashboard') === '首页');
 check('missing key returns the key itself', Lang::t('no.such.key') === 'no.such.key');
 check('htmlLang maps english', (function () { Lang::set('en'); $v = Lang::htmlLang(); Lang::set('zh_cn'); return $v; })() === 'en');
 

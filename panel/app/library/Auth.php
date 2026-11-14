@@ -26,8 +26,9 @@ final class Auth
     /**
      * Whether the request reached us over HTTPS. nginx terminating TLS reports
      * plain HTTP to php-fpm, so X-Forwarded-Proto is honoured, but only from a
-     * loopback/private peer (or when PANEL_TRUST_PROXY=1) to keep a direct
-     * client from forcing Secure cookies on a plain-HTTP install.
+     * loopback/private peer (or when the installer-enabled trust_proxy setting
+     * is on) to keep a direct client from forcing Secure cookies on a
+     * plain-HTTP install.
      */
     public static function isHttps(): bool
     {
@@ -38,7 +39,7 @@ final class Auth
         if (strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) !== 'https') {
             return false;
         }
-        if (getenv('PANEL_TRUST_PROXY') === '1') {
+        if (Db::setting('trust_proxy') === '1') {
             return true;
         }
         $remote = (string)($_SERVER['REMOTE_ADDR'] ?? '');
@@ -127,20 +128,5 @@ final class Auth
             throw new \RuntimeException(Lang::t('err.noToken'));
         }
         return Db::decrypt((string)$user['ns_access_token_enc']);
-    }
-
-    /** First-time bootstrap: create the admin account from env or defaults. */
-    public static function bootstrapAdmin(): void
-    {
-        $pdo = Db::pdo();
-        $exists = $pdo->query('SELECT COUNT(*) AS c FROM panel_users WHERE role = "admin"')->fetch();
-        if ((int)$exists['c'] > 0) {
-            return;
-        }
-        $username = getenv('PANEL_ADMIN_USER') ?: 'admin';
-        $password = getenv('PANEL_ADMIN_PASS') ?: bin2hex(random_bytes(8));
-        $stmt = $pdo->prepare('INSERT INTO panel_users (username, password_hash, role) VALUES (?, ?, "admin")');
-        $stmt->execute([$username, password_hash($password, PASSWORD_DEFAULT)]);
-        error_log('[night-panel] bootstrap admin created: ' . $username . ' / ' . $password);
     }
 }

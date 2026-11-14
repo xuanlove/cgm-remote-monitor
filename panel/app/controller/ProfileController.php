@@ -15,7 +15,8 @@ class ProfileController extends BaseController
     {
         $user = PanelContext::requireUser();
 
-        return $this->render('profile', [
+        return $this->render('settings', [
+            'tab' => 'profile',
             'profile' => ProfileService::forUser($user),
             'error' => null,
             'success' => null,
@@ -28,14 +29,20 @@ class ProfileController extends BaseController
 
         try {
             $own = ProfileService::saveOwn($user, $request->post());
-            return $this->render('profile', ['profile' => $own, 'error' => null, 'success' => true]);
+            return $this->render('settings', [
+                'tab' => 'profile',
+                'profile' => $own,
+                'error' => null,
+                'success' => true,
+            ]);
         } catch (\InvalidArgumentException $e) {
             $message = $e->getMessage();
         } catch (NsException $e) {
             $message = t('msg.saveFailed', ['msg' => $e->getMessage()]);
         }
 
-        return $this->render('profile', [
+        return $this->render('settings', [
+            'tab' => 'profile',
             'profile' => ProfileService::forUser($user),
             'error' => $message,
             'success' => null,

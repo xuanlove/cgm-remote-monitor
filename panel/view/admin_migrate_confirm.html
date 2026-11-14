@@ -1,0 +1,34 @@
+{extend name="layout/base" /}
+{block name="content"}
+<div class="card" style="max-width:640px;margin:40px auto;">
+  <h1>{:t('admin.migrateConfirmTitle')}</h1>
+  <p>{:t_html('admin.migrateConfirmIntro', [
+    'n' => count($affected),
+    'from' => $from['name'],
+    'to' => $to['name'],
+  ])}</p>
+  {if condition="$cleanup"}<p class="msg-bad">{:t('admin.migrateCleanupOn')}</p>{/if}
+
+  <table>
+    <thead><tr>
+      <th>{:t('adm.col.id')}</th>
+      <th>{:t('adm.col.username')}</th>
+      <th>{:t('adm.col.createdAt')}</th>
+    </tr></thead>
+    <tbody>
+    {foreach $affected as $u}
+      <tr><td>{$u.id}</td><td><code>{$u.username}</code></td><td class="hint">{$u.created_at}</td></tr>
+    {/foreach}
+    </tbody>
+  </table>
+
+  <form method="post" action="/admin/migrate/run">
+    <input type="hidden" name="csrf" value="{$csrf}">
+    <input type="hidden" name="from" value="{$from.id}">
+    <input type="hidden" name="to" value="{$to.id}">
+    <input type="hidden" name="cleanup" value="{if condition="$cleanup"}1{else /}0{/if}">
+    <button>{:t('admin.migrateRun')}</button>
+  </form>
+  <p><a href="/admin/migrate" style="color:var(--accent);">{:t('admin.migrateCancel')}</a></p>
+</div>
+{/block}

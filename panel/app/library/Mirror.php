@@ -168,22 +168,25 @@ final class Mirror
     }
 
     /**
-     * All cached profile records, newest first (the first one is active).
+     * All cached profile records of one backend, newest first (the first one
+     * is active). Profiles are shared per Nightscout backend, so the mirror
+     * is keyed by backend, not by user.
      *
      * @return array<int,array<string,mixed>>
      */
-    public static function profiles(): array
+    public static function profiles(int $backendId): array
     {
-        $stmt = Db::pdo()->query(
-            'SELECT payload FROM panel_profiles ORDER BY start_date DESC, fetched_at DESC'
+        $stmt = Db::pdo()->prepare(
+            'SELECT payload FROM panel_profiles WHERE backend_id = ? ORDER BY start_date DESC, fetched_at DESC'
         );
+        $stmt->execute([$backendId]);
         return self::decodeAll($stmt->fetchAll());
     }
 
     /** The profile record currently in effect, or null before the first sync. */
-    public static function profileRecord(): ?array
+    public static function profileRecord(int $backendId): ?array
     {
-        $records = self::profiles();
+        $records = self::profiles($backendId);
         return $records[0] ?? null;
     }
 

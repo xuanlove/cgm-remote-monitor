@@ -13,7 +13,7 @@ if (PHP_SAPI !== 'cli') {
 
 $dbFile = sys_get_temp_dir() . '/panel-mirror-test-' . getmypid() . '.db';
 @unlink($dbFile);
-putenv('PANEL_DB=' . $dbFile);
+define('PANEL_DB_FILE', $dbFile);
 
 require __DIR__ . '/../vendor/autoload.php';
 
@@ -111,12 +111,15 @@ $pdo->prepare(
 check('latestDeviceStatus decodes the payload', abs(Mirror::latestDeviceStatus(1)['iob']['iob'] - 1.2) < 0.001);
 
 $profile = static fn(string $id, string $start): array => [
-    $id, $start, json_encode(['_id' => $id, 'startDate' => $start, 'store' => ['alice' => ['dia' => 3]]]),
+    1, $id, $start, json_encode(['_id' => $id, 'startDate' => $start, 'store' => ['alice' => ['dia' => 3]]]),
 ];
-$pIns = $pdo->prepare('INSERT INTO panel_profiles (ns_id, start_date, payload) VALUES (?, ?, ?)');
+$pIns = $pdo->prepare(
+    'INSERT INTO panel_profiles (backend_id, ns_id, start_date, payload) VALUES (?, ?, ?, ?)'
+);
 $pIns->execute($profile('p1', '2026-01-01T00:00:00.000Z'));
 $pIns->execute($profile('p2', '2026-06-01T00:00:00.000Z'));
-check('profileRecord picks the newest record', Mirror::profileRecord()['_id'] === 'p2');
+check('profileRecord picks the newest record', Mirror::profileRecord(1)['_id'] === 'p2');
+check('profileRecord is backend scoped', Mirror::profileRecord(2) === null);
 
 $pdo->prepare(
     'INSERT INTO panel_sync_state (user_id, stream, cursor_ms, last_ok_at) VALUES (1, "entries:sgv", ?, ?)'
@@ -136,19 +139,16 @@ check('ackAlerts ignores foreign ids', Mirror::ackAlerts(2, [1]) === 0);
 
 check('syncState lists the user streams', count(Mirror::syncState(1)) === 1);
 
-// M1: the Nightscout admin secret must not sit in the settings table as-is.
-Db::setSecret('ns_secret', 'shiro-secret');
-$storedSecret = (string)Db::setting('ns_secret');
-check('setSecret stores ciphertext', $storedSecret !== 'shiro-secret' && str_starts_with($storedSecret, 'enc:v1:'));
-check('secret() decrypts the stored value', Db::secret('ns_secret') === 'shiro-secret');
-Db::setSetting('ns_secret', 'legacy-plaintext');
-check('secret() still reads legacy plaintext', Db::secret('ns_secret') === 'legacy-plaintext');
-
-// The key seed must not sit inside the database: a stolen panel.db would
-// otherwise carry both the ciphertext and the material to decrypt it.
-check('key seed lives beside the database', is_file($dbFile . '.key'));
-check('key seed is not stored in panel_settings', Db::setting('key_seed') === null);
-check('key seed file is private', (fileperms($dbFile . '.key') & 0777) === 0600);
+// Secrets are encrypted with the in-database seed: a stolen panel.db is
+// useless without it, and it never leaves the database.
+$blob = Db::encrypt('shiro-secret');
+check('encrypt produces ciphertext', $blob !== 'shiro-secret' && base64_decode($blob, true) !== false);
+check('decrypt round-trips', Db::decrypt($blob) === 'shiro-secret');
+check('two encryptions differ (random IV)', Db::encrypt('shiro-secret') !== $blob);
+check('key seed lives in panel_settings', strlen((string)Db::setting('key_seed')) === 64);
+check('no key file beside the database', !is_file($dbFile . '.key'));
+clearstatcache();
+check('database file is private', (fileperms($dbFile) & 0777) === 0600);
 
 // M5: fixed-window throttling.
 check('rateLimit allows attempts inside the window', Db::rateLimit('test', 'k', 2, 60));
@@ -159,7 +159,6 @@ check('rateLimit keeps identities apart', Db::rateLimit('test', 'other', 2, 60))
 @unlink($dbFile);
 @unlink($dbFile . '-wal');
 @unlink($dbFile . '-shm');
-@unlink($dbFile . '.key');
 
 echo $failures === 0 ? "\nOK — {$checks} checks passed\n" : "\n{$failures} of {$checks} checks failed\n";
 exit($failures === 0 ? 0 : 1);

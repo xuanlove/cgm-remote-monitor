@@ -3,15 +3,16 @@ declare(strict_types=1);
 
 namespace app\service;
 
+use NightPanel\Backends;
 use NightPanel\Db;
-use NightPanel\NsConfig;
 use NightPanel\Sync;
 
 /**
  * Nightscout -> local mirror synchroniser.
  *
  * Shared by `php think sync` and the cron-compatible `bin/sync.php` shim, so
- * both entry points keep identical locking and exit codes.
+ * both entry points keep identical locking and exit codes. Each panel user
+ * syncs from the backend their account lives on.
  */
 final class SyncRunner
 {
@@ -41,15 +42,6 @@ final class SyncRunner
             return self::EXIT_LOCKED;
         }
 
-        try {
-            $sync = new Sync(NsConfig::client(), $log);
-        } catch (\Throwable $e) {
-            fwrite(STDERR, 'sync: ' . $e->getMessage() . "\n");
-            flock($lock, LOCK_UN);
-            fclose($lock);
-            return self::EXIT_ERROR;
-        }
-
         $full = !empty($options['full']);
         $days = isset($options['days']) && $options['days'] !== '' && $options['days'] !== null
             ? max(1, (int)$options['days'])
@@ -59,12 +51,14 @@ final class SyncRunner
         $errors = 0;
 
         if (!empty($options['profiles'])) {
-            try {
-                $count = $sync->profiles();
-                $log('profiles: ' . $count . ' records');
-            } catch (\Throwable $e) {
-                fwrite(STDERR, 'profiles failed: ' . $e->getMessage() . "\n");
-                $errors++;
+            foreach (Backends::all() as $backend) {
+                try {
+                    $count = (new Sync(Backends::clientFor($backend), (int)$backend['id'], $log))->profiles();
+                    $log('profiles[' . $backend['name'] . ']: ' . $count . ' records');
+                } catch (\Throwable $e) {
+                    fwrite(STDERR, 'profiles[' . $backend['name'] . '] failed: ' . $e->getMessage() . "\n");
+                    $errors++;
+                }
             }
         }
 
@@ -84,7 +78,15 @@ final class SyncRunner
             }
 
             foreach ($users as $row) {
-                $summary = $sync->user($row, ['entries', 'treatments', 'devicestatus'], $full, $days);
+                try {
+                    $client = Backends::clientFor((int)$row['backend_id']);
+                } catch (\Throwable $e) {
+                    fwrite(STDERR, $row['username'] . ' error: backend unavailable: ' . $e->getMessage() . "\n");
+                    $errors++;
+                    continue;
+                }
+                $summary = (new Sync($client, (int)$row['backend_id'], $log))
+                    ->user($row, ['entries', 'treatments', 'devicestatus'], $full, $days);
                 $parts = [];
                 foreach ($summary as $key => $value) {
                     if ($key === 'user' || $key === 'errors') {

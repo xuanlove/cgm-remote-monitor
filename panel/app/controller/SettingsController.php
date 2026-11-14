@@ -15,7 +15,8 @@ class SettingsController extends BaseController
     {
         $user = PanelContext::requireUser();
 
-        return $this->render('alerts', [
+        return $this->render('settings', [
+            'tab' => 'alerts',
             'settings' => Alerts::load((int)$user['id']),
             'permText' => $this->permText(),
             'error' => null,
@@ -28,7 +29,8 @@ class SettingsController extends BaseController
         $user = PanelContext::requireUser();
         [$settings, $error] = Alerts::save((int)$user['id'], $request->post());
 
-        return $this->render('alerts', [
+        return $this->render('settings', [
+            'tab' => 'alerts',
             'settings' => $settings,
             'permText' => $this->permText(),
             'error' => $error,

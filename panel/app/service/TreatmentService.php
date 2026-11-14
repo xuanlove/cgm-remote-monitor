@@ -3,9 +3,10 @@ declare(strict_types=1);
 
 namespace app\service;
 
+use NightPanel\Backends;
 use NightPanel\Lang;
 use NightPanel\Mirror;
-use NightPanel\NsConfig;
+use NightPanel\NsClient;
 use NightPanel\NsException;
 use NightPanel\TreatmentTypes;
 
@@ -15,6 +16,12 @@ use NightPanel\TreatmentTypes;
  */
 final class TreatmentService
 {
+    /** The Nightscout client of the user's backend. */
+    private static function client(array $user): NsClient
+    {
+        return Backends::clientFor((int)($user['backend_id'] ?? 0));
+    }
+
     /** One treatment for the read-only edit form, mirror first. */
     public static function find(array $user, string $id): ?array
     {
@@ -23,7 +30,7 @@ final class TreatmentService
             return $record;
         }
         try {
-            return NsConfig::client()->treatmentById($id);
+            return self::client($user)->treatmentById($id);
         } catch (NsException $e) {
             return null;
         }
@@ -37,9 +44,9 @@ final class TreatmentService
      * failure propagates instead of looking like "not found", so the caller
      * answers 502 rather than 403.
      */
-    public static function findLive(string $id): ?array
+    public static function findLive(array $user, string $id): ?array
     {
-        return $id === '' ? null : NsConfig::client()->treatmentById($id);
+        return $id === '' ? null : self::client($user)->treatmentById($id);
     }
 
     /** A record belongs to the session user only when the stored attribution says so. */
@@ -70,7 +77,7 @@ final class TreatmentService
      */
     public static function submit(array $user, array $post): void
     {
-        $client = NsConfig::client();
+        $client = self::client($user);
 
         switch ((string)($post['kind'] ?? '')) {
             case 'glucose':
@@ -139,7 +146,7 @@ final class TreatmentService
         $updated['enteredBy'] = (string)$existing['enteredBy'];
         $updated['created_at'] = (string)($existing['created_at'] ?? gmdate('c'));
 
-        $saved = self::created(NsConfig::client()->updateTreatment($updated)) ?? $updated;
+        $saved = self::created(self::client($user)->updateTreatment($updated)) ?? $updated;
         Mirror::storeTreatment((int)$user['id'], $saved);
 
         return $saved;
@@ -151,7 +158,7 @@ final class TreatmentService
         if (!self::owned($existing, $user)) {
             return;
         }
-        NsConfig::client()->deleteTreatment($id);
+        self::client($user)->deleteTreatment($id);
         Mirror::forgetTreatment((int)$user['id'], $id);
     }
 

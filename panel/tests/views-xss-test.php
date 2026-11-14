@@ -172,9 +172,19 @@ check('dashboard builds treatment rows with the DOM', str_contains(
 // --- every template compiles and renders -----------------------------------
 $emptyStats = \NightPanel\GlucoseStats::compute([], 3.9, 10.0);
 
+$backendRow = static fn(int $id, string $name, int $users = 0): array => [
+    'id' => $id,
+    'name' => $name,
+    'url' => 'http://127.0.0.1:133' . $id,
+    'secret_enc' => 'enc:v1:xxx',
+    'enabled' => 1,
+    'created_at' => '2026-01-01 00:00:00',
+    'user_count' => $users,
+];
+
 $fixtures = [
     'login' => ['error' => null],
-    'register' => ['error' => null, 'success' => null, 'info' => null],
+    'register' => ['error' => null, 'success' => null, 'info' => null, 'backends' => [$backendRow(1, 'NS One')]],
     'dashboard' => ['dashI18n' => '{}', 'csrfJson' => '""'],
     'reports' => [
         'days' => 14,
@@ -185,8 +195,33 @@ $fixtures = [
         'to' => '2026-01-15 00:00',
         'error' => null,
     ],
-    'plans' => ['plans' => [], 'error' => null, 'success' => null],
-    'profile' => ['profile' => null, 'error' => null, 'success' => null],
+    'settings:profile' => [
+        'profile' => [
+            'dia' => 3.0,
+            'carbs_hr' => 30,
+            'timezone' => 'UTC',
+            'basal' => [['00:00', 1.0]],
+            'sens' => [['00:00', 50]],
+            'target_low' => [['00:00', 4]],
+            'target_high' => [['00:00', 10]],
+        ],
+        'error' => null,
+        'success' => null,
+    ],
+    'settings:plans' => [
+        'plans' => [[
+            'id' => 'p1',
+            'active' => true,
+            'startDate' => '2026-01-01T00:00:00.000Z',
+            'dia' => 3.0,
+            'basalCount' => 3,
+            'targetLow' => 4,
+            'targetHigh' => 10,
+            'shared' => false,
+        ]],
+        'error' => null,
+        'success' => null,
+    ],
     'entry' => [
         'types' => [],
         'fields' => [],
@@ -210,19 +245,52 @@ $fixtures = [
         'error' => null,
         'success' => null,
     ],
-    'alerts' => [
+    'settings:alerts' => [
         'settings' => ['low' => 3.9, 'high' => 10.0, 'enabled' => false, 'browser' => false],
         'permText' => '{}',
         'error' => null,
         'success' => null,
     ],
-    'myapi' => ['nsUrl' => 'http://127.0.0.1:1337', 'token' => 'abcdef1234567890', 'tokenMask' => 'abcdef-••••'],
+    'settings:api' => [
+        'nsUrl' => 'http://127.0.0.1:1337',
+        'backendName' => 'NS One',
+        'token' => 'abcdef1234567890',
+        'tokenMask' => 'abcdef-••••',
+    ],
     'admin' => [
-        'users' => [],
-        'nsStatus' => null,
-        'nsError' => null,
-        'settingsError' => null,
-        'configSource' => ['url' => 'none', 'secret' => 'none'],
+        'users' => [[
+            'id' => 2,
+            'username' => 'alice',
+            'role' => 'user',
+            'backend_id' => 1,
+            'backend_name' => 'NS One',
+            'ns_subject_id' => 's1',
+            'created_at' => '2026-01-01 00:00:00',
+        ]],
+        'backends' => [$backendRow(1, 'NS One', 1), $backendRow(2, 'NS Two')],
+        'error' => null,
+        'notice' => null,
+    ],
+    'admin_migrate' => [
+        'backends' => [$backendRow(1, 'NS One'), $backendRow(2, 'NS Two')],
+        'error' => null,
+    ],
+    'admin_migrate_confirm' => [
+        'from' => $backendRow(1, 'NS One'),
+        'to' => $backendRow(2, 'NS Two'),
+        'cleanup' => true,
+        'affected' => [['id' => 2, 'username' => 'alice', 'created_at' => '2026-01-01 00:00:00']],
+    ],
+    'admin_migrate_done' => [
+        'from' => $backendRow(1, 'NS One'),
+        'to' => $backendRow(2, 'NS Two'),
+        'cleanup' => true,
+        'results' => [
+            ['username' => 'alice', 'ok' => true, 'entries' => 120, 'treatments' => 3,
+             'devicestatus' => 10, 'error' => null, 'cleanupError' => null],
+            ['username' => 'bob', 'ok' => false, 'entries' => 0, 'treatments' => 0,
+             'devicestatus' => 0, 'error' => 'Nightscout API ...', 'cleanupError' => null],
+        ],
     ],
     '404' => [],
     'error' => ['message' => 'boom'],
@@ -231,8 +299,13 @@ $fixtures = [
 $broken = [];
 foreach ($fixtures as $name => $vars) {
     try {
-        // PHP turns the numeric-looking '404' key into an integer.
-        $html = render($driver, (string)$name, $vars);
+        // "settings:profile" renders the shared settings template with that
+        // tab; anything without a colon is a plain template name.
+        [$template, $tab] = array_pad(explode(':', (string)$name, 2), 2, '');
+        if ($tab !== '') {
+            $vars['tab'] = $tab;
+        }
+        $html = render($driver, $template, $vars);
         if (!str_contains($html, '<!DOCTYPE html>')) {
             $broken[] = $name . ' (no layout)';
         }

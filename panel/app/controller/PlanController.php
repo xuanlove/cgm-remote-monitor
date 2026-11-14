@@ -15,8 +15,9 @@ class PlanController extends BaseController
     {
         $user = PanelContext::requireUser();
 
-        return $this->render('plans', [
-            'plans' => ProfileService::plans((string)$user['username']),
+        return $this->render('settings', [
+            'tab' => 'plans',
+            'plans' => ProfileService::plans($user),
             'error' => null,
             'success' => null,
         ]);
@@ -34,8 +35,9 @@ class PlanController extends BaseController
             return redirect('/profile/plans');
         }
 
-        return $this->render('plans', [
-            'plans' => ProfileService::plans((string)$user['username']),
+        return $this->render('settings', [
+            'tab' => 'plans',
+            'plans' => ProfileService::plans($user),
             'error' => $error,
             'success' => null,
         ]);
@@ -53,8 +55,9 @@ class PlanController extends BaseController
             return redirect('/profile/plans');
         }
 
-        return $this->render('plans', [
-            'plans' => ProfileService::plans((string)$user['username']),
+        return $this->render('settings', [
+            'tab' => 'plans',
+            'plans' => ProfileService::plans($user),
             'error' => $error,
             'success' => null,
         ]);

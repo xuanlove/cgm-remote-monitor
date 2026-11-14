@@ -68,7 +68,28 @@ Route::group(function () {
     Route::post('admin/users/delete', 'Admin/deleteUser')
         ->middleware(CsrfGuard::class)
         ->middleware(AdminOnly::class);
-    Route::post('admin/settings', 'Admin/saveSettings')
+
+    Route::post('admin/backends/add', 'Admin/addBackend')
+        ->middleware(CsrfGuard::class)
+        ->middleware(AdminOnly::class);
+    Route::post('admin/backends/save', 'Admin/saveBackend')
+        ->middleware(CsrfGuard::class)
+        ->middleware(AdminOnly::class);
+    Route::post('admin/backends/toggle', 'Admin/toggleBackend')
+        ->middleware(CsrfGuard::class)
+        ->middleware(AdminOnly::class);
+    Route::post('admin/backends/delete', 'Admin/deleteBackend')
+        ->middleware(CsrfGuard::class)
+        ->middleware(AdminOnly::class);
+    Route::post('admin/backends/test', 'Admin/testBackend')
+        ->middleware(CsrfGuard::class)
+        ->middleware(AdminOnly::class);
+
+    Route::get('admin/migrate', 'Admin/migratePage')->middleware(AdminOnly::class);
+    Route::post('admin/migrate/confirm', 'Admin/migrateConfirm')
+        ->middleware(CsrfGuard::class)
+        ->middleware(AdminOnly::class);
+    Route::post('admin/migrate/run', 'Admin/migrateRun')
         ->middleware(CsrfGuard::class)
         ->middleware(AdminOnly::class);
 })->middleware(Authenticate::class);

@@ -9,6 +9,7 @@ declare(strict_types=1);
  * the GET /logout probe that has to answer 405.
  */
 return [
+    \app\middleware\EnsureInstalled::class,
     \app\middleware\SecurityHeaders::class,
     \app\middleware\NormalizePath::class,
     \app\middleware\StartSession::class,

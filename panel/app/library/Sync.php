@@ -20,7 +20,7 @@ final class Sync
     /** @var callable|null */
     private $log;
 
-    public function __construct(private NsClient $client, ?callable $log = null)
+    public function __construct(private NsClient $client, private int $backendId = 0, ?callable $log = null)
     {
         $this->log = $log;
     }
@@ -74,16 +74,18 @@ final class Sync
     }
 
     /**
-     * Refresh the (global) profile snapshot: every user's store lives in the
-     * same records, so this runs once per schedule instead of per user.
+     * Refresh the profile snapshot of this backend: every user on the same
+     * backend shares one profile document, so this runs once per backend per
+     * schedule instead of per user.
      */
     public function profiles(): int
     {
         $started = microtime(true);
+        $stream = 'profiles:b' . $this->backendId;
         $stmt = Db::pdo()->prepare(
-            'INSERT INTO panel_profiles (ns_id, start_date, payload, fetched_at)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(ns_id) DO UPDATE SET
+            'INSERT INTO panel_profiles (backend_id, ns_id, start_date, payload, fetched_at)
+             VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(backend_id, ns_id) DO UPDATE SET
                 start_date = excluded.start_date,
                 payload = excluded.payload,
                 fetched_at = excluded.fetched_at'
@@ -99,6 +101,7 @@ final class Sync
                     continue;
                 }
                 $stmt->execute([
+                    $this->backendId,
                     $id,
                     (string)($record['startDate'] ?? ''),
                     json_encode($record, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
@@ -107,8 +110,9 @@ final class Sync
                 $count++;
             }
             Db::pdo()->exec(
-                'DELETE FROM panel_profiles WHERE ns_id NOT IN (
-                    SELECT ns_id FROM panel_profiles
+                'DELETE FROM panel_profiles WHERE backend_id = ' . (int)$this->backendId . '
+                 AND ns_id NOT IN (
+                    SELECT ns_id FROM panel_profiles WHERE backend_id = ' . (int)$this->backendId . '
                      ORDER BY start_date DESC, fetched_at DESC LIMIT 30
                 )'
             );
@@ -117,13 +121,13 @@ final class Sync
             if (Db::pdo()->inTransaction()) {
                 Db::pdo()->rollBack();
             }
-            self::markError(0, 'profiles', $e->getMessage());
-            $this->logRow(0, 'profiles', $started, 0, 'error', $e->getMessage());
+            self::markError(0, $stream, $e->getMessage());
+            $this->logRow(0, $stream, $started, 0, 'error', $e->getMessage());
             throw $e;
         }
 
-        self::markOk(0, 'profiles', 0);
-        $this->logRow(0, 'profiles', $started, $count, 'ok', null);
+        self::markOk(0, $stream, 0);
+        $this->logRow(0, $stream, $started, $count, 'ok', null);
         return $count;
     }
 

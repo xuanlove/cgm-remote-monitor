@@ -32,9 +32,6 @@ class StartSession
 
         Lang::init();
 
-        // First-run convenience: only web requests may create the admin row.
-        Auth::bootstrapAdmin();
-
         return $next($request);
     }
 }

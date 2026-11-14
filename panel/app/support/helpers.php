@@ -10,14 +10,27 @@ declare(strict_types=1);
 
 use NightPanel\Lang;
 
-/** Absolute path of the SQLite database (PANEL_DB wins). */
+/**
+ * Absolute path of the SQLite database. No environment configuration: the
+ * panel is configured through install.php, which writes everything to the
+ * database. Tests may inject a temp path via the PANEL_DB_FILE constant.
+ */
 function panel_db_file(): string
 {
-    $env = getenv('PANEL_DB');
-    if ($env !== false && $env !== '') {
-        return $env;
+    if (defined('PANEL_DB_FILE')) {
+        return (string)constant('PANEL_DB_FILE');
     }
     return dirname(__DIR__, 2) . '/data/panel.db';
+}
+
+/**
+ * Absolute path of the installer lock. Written once by install.php, and both
+ * the installer and the EnsureInstalled middleware must resolve it the same
+ * way — derived from the database path, so tests can move both together.
+ */
+function panel_lock_file(): string
+{
+    return dirname(panel_db_file()) . '/install.lock';
 }
 
 /** Translate a key, substituting `:name` placeholders. */
