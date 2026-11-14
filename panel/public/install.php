@@ -21,6 +21,15 @@ header('X-Frame-Options: DENY');
 header('Referrer-Policy: no-referrer');
 
 if (session_status() === PHP_SESSION_NONE) {
+    // Same cookie flags as the panel's StartSession middleware, minus the
+    // proxy rule (there is no settings database to consult before install).
+    $installHttps = strtolower((string)($_SERVER['HTTPS'] ?? '')) !== '' && strtolower((string)($_SERVER['HTTPS'])) !== 'off';
+    session_set_cookie_params([
+        'httponly' => true,
+        'samesite' => 'Lax',
+        'secure' => $installHttps,
+        'path' => '/',
+    ]);
     session_name('nightpanel');
     session_start();
 }
@@ -51,6 +60,7 @@ function page(string $title, string $body): void
         . 'button{margin-top:22px;padding:10px 22px;border:0;border-radius:8px;background:#2f81f7;'
         . 'color:#fff;font-size:14px;cursor:pointer}button:disabled{background:#33415a;cursor:not-allowed}'
         . '.btn-ghost{background:#263243;margin-left:10px;padding:10px 14px}'
+        . '.btn-danger{background:#b3444c}'
         . '.ok{color:#4cc38a}.bad{color:#ff6b6b}.warn{color:#e5c07b}'
         . 'ul.checks{list-style:none;padding:0;margin:0;font-size:14px}'
         . 'ul.checks li{padding:5px 0;border-bottom:1px dashed #263243}'
@@ -75,24 +85,54 @@ $dataDir = dirname($dbFile);
 $lockFile = panel_lock_file();
 
 /**
- * Installed = lock file, or a database that already carries accounts or a
- * key seed (someone deleted the lock on a live install).
+ * Installation state. The lock file is the single source of truth; accounts
+ * without a lock mean a previous install died halfway (or someone deleted
+ * the lock on a live install) and need the repair page, not the form.
+ *
+ * fresh   nothing usable yet — show the install form
+ * broken  a database exists but cannot be opened (legacy schema, corrupt) —
+ *         show the form; the install POST will surface the real error
+ * partial accounts but no lock — show the repair page
+ * installed lock present — installer refuses to run
  */
-function isInstalled(string $lockFile, string $dbFile): bool
+function installState(string $lockFile, string $dbFile): string
 {
     if (is_file($lockFile)) {
-        return true;
+        return 'installed';
     }
     if (!is_file($dbFile)) {
-        return false;
+        return 'fresh';
     }
     try {
-        \NightPanel\Db::setting('key_seed');
         $count = (int)\NightPanel\Db::pdo()
             ->query('SELECT COUNT(*) FROM panel_users')->fetchColumn();
-        return $count > 0;
+        return $count > 0 ? 'partial' : 'fresh';
     } catch (\Throwable $notUsable) {
-        return false;
+        return 'broken';
+    }
+}
+
+/** How many accounts/backends a partial database still holds. */
+function partialCounts(): array
+{
+    try {
+        $pdo = \NightPanel\Db::pdo();
+        return [
+            'users' => (int)$pdo->query('SELECT COUNT(*) FROM panel_users')->fetchColumn(),
+            'backends' => (int)$pdo->query('SELECT COUNT(*) FROM panel_ns_backends')->fetchColumn(),
+        ];
+    } catch (\Throwable $unusable) {
+        return ['users' => 0, 'backends' => 0];
+    }
+}
+
+/** Drop every database artifact of a failed install (fresh start). */
+function wipeDatabase(string $dbFile): void
+{
+    foreach ([$dbFile, $dbFile . '-wal', $dbFile . '-shm'] as $f) {
+        if (is_file($f)) {
+            @unlink($f);
+        }
     }
 }
 
@@ -133,13 +173,47 @@ function csrfToken(): string
     return $_SESSION['install_csrf'];
 }
 
-// ---- already installed? ----------------------------------------------------
-if (isInstalled($lockFile, $dbFile)) {
+$state = installState($lockFile, $dbFile);
+
+/** The "already installed" page the installer locks itself behind. */
+function lockedPage(): void
+{
     page('面板已安装', '<h1>已安装</h1>'
         . '<p>面板已经完成安装，出于安全考虑安装器已锁定。</p>'
         . '<p class="hint">如需重新安装：备份并删除 <code>data/panel.db</code> 与 <code>data/install.lock</code> 后再打开本页。</p>'
         . '<p><a href="/login" style="color:#2f81f7">前往登录 →</a></p>');
     exit;
+}
+
+/**
+ * A previous install died halfway (accounts exist, no lock). The panel
+ * redirects here too, so instead of a dead loop between "installed" and
+ * "not installed" the admin gets one page that can actually fix it.
+ *
+ * @param array{users:int,backends:int} $counts
+ */
+function repairPage(array $counts, string $csrf, string $error = ''): void
+{
+    $warning = $counts['backends'] > 0
+        ? '数据库看起来配置完整（含 ' . $counts['backends'] . ' 个后端），只是缺少安装锁——常见于手动删除锁文件想重装。'
+        : '数据库中已有 ' . $counts['users'] . ' 个账号，但安装没有完成（未写入安装锁）。';
+    $body = '<h1>安装未完成</h1>'
+        . ($error !== '' ? '<div class="error">' . h($error) . '</div>' : '')
+        . '<p>' . $warning . '</p>'
+        . '<p class="hint">面板页面此时会循环跳回安装器，属于预期行为；请选择下方操作之一解除。</p>'
+        . '<form method="post" action="install.php?action=restart" onsubmit="return confirm(\'将永久删除数据库中所有账号与后端配置，无法恢复。确定继续？\')">'
+        . '<input type="hidden" name="csrf" value="' . h($csrf) . '">'
+        . '<input type="hidden" name="action" value="restart">'
+        . '<button type="submit" class="btn-danger">重置数据库并重新安装</button>'
+        . '</form>'
+        . '<p class="hint" style="margin-top:14px">或：手动删除 <code>data/panel.db</code> 与 <code>data/install.lock</code>（如有）后刷新本页。</p>';
+    page('安装未完成', $body);
+    exit;
+}
+
+// ---- locked? ----------------------------------------------------------------
+if ($state === 'installed') {
+    lockedPage();
 }
 
 // ---- AJAX backend connection test ------------------------------------------
@@ -152,6 +226,13 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && ($_GET['action'] ?? '') ===
     };
     if (!hash_equals(csrfToken(), field('csrf'))) {
         $out(false, '会话已过期，请刷新页面');
+    }
+    // The pre-install page is web-reachable; do not let it become an
+    // unlimited URL/secret probe. Ten tries per session is plenty to test
+    // a couple of typos.
+    $_SESSION['install_tests'] = (int)($_SESSION['install_tests'] ?? 0) + 1;
+    if ($_SESSION['install_tests'] > 10) {
+        $out(false, '测试次数已达上限');
     }
     $url = rtrim(field('url'), '/');
     $secret = field('secret');
@@ -166,6 +247,23 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && ($_GET['action'] ?? '') ===
     } catch (\Throwable $e) {
         $out(false, '连接失败：' . $e->getMessage());
     }
+}
+
+// ---- repair: wipe a half-finished install ------------------------------------
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && (($_GET['action'] ?? '') === 'restart' || ($_POST['action'] ?? '') === 'restart')) {
+    if (!hash_equals(csrfToken(), field('csrf'))) {
+        repairPage(partialCounts(), csrfToken(), '令牌不匹配，请重试');
+    }
+    if (installState($lockFile, $dbFile) !== 'partial') {
+        // Lock appeared meanwhile (or nothing to reset): show the right page.
+        installState($lockFile, $dbFile) === 'installed' ? lockedPage() : null;
+    } else {
+        wipeDatabase($dbFile);
+        // A settings-only database (no accounts) also counts as a leftover;
+        // it is rewritable, so dropping it keeps behaviour predictable.
+    }
+    header('Location: install.php');
+    exit;
 }
 
 // ---- install ----------------------------------------------------------------
@@ -185,12 +283,26 @@ $defaults = [
 ];
 
 if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
+    // Re-check on every submit: a double click or a second tab can land
+    // after the first POST finished the install, and re-running it would
+    // crash on the duplicate admin and then advise deleting a working
+    // database.
+    $state = installState($lockFile, $dbFile);
+    if ($state === 'installed') {
+        lockedPage();
+    }
+    if ($state === 'partial') {
+        repairPage(partialCounts(), csrfToken());
+    }
+
     $adminUser = strtolower(field('admin_user'));
     $adminPass = (string)($_POST['admin_pass'] ?? '');
     $adminPass2 = (string)($_POST['admin_pass2'] ?? '');
     $nsName = field('ns_name');
     $nsUrl = rtrim(field('ns_url'), '/');
-    $nsSecret = (string)($_POST['ns_secret'] ?? '');
+    // Trimmed to match the AJAX test endpoint: a secret with a pasted-on
+    // trailing space would pass the test but break every real request.
+    $nsSecret = field('ns_secret');
     $lang = field('lang', 'zh_cn');
     $trustProxy = isset($_POST['trust_proxy']);
     $defaults = [
@@ -239,20 +351,28 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST') {
                 \NightPanel\Backends::create($nsName, $nsUrl, $nsSecret);
 
                 if (@file_put_contents($lockFile, 'installed ' . gmdate('c') . "\n") === false) {
-                    throw new \RuntimeException('无法写入安装锁文件 ' . $lockFile);
+                    throw new \RuntimeException('无法写入安装锁文件 ' . basename($lockFile) . '（data/ 目录不可写？）');
                 }
 
                 header('Location: /login');
                 exit;
             } catch (\Throwable $e) {
-                $error = '安装失败：' . $e->getMessage()
-                    . '。如需重试，请先删除 data/panel.db 与 data/install.lock。';
+                $error = '安装失败：' . $e->getMessage();
+                // Writes may have landed before the failure: re-sync so the
+                // render gate below shows the repair page, not a dead form.
+                $state = installState($lockFile, $dbFile);
             }
         }
     }
 }
 
 // ---- render ------------------------------------------------------------------
+// A half-finished install (GET, or a POST whose writes partially landed)
+// goes to the repair page, never the form.
+if ($state === 'partial') {
+    repairPage(partialCounts(), csrfToken(), $error);
+}
+
 $rows = '';
 foreach ($checks as [$label, $ok]) {
     $rows .= '<li class="' . ($ok ? 'ok' : 'bad') . '">' . ($ok ? '✓' : '✗') . ' ' . h($label) . '</li>';

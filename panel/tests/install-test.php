@@ -238,6 +238,79 @@ $legacy = null;
 check('legacy v1 database is refused', str_contains($out, 'Legacy'));
 check('legacy refusal writes no lock', !is_file($dir . '/install.lock'));
 
+// --- a half-finished install shows the repair page, not a dead loop -----------
+$dir = scenario('partial');
+runInstaller($dir, 'POST', [
+    'csrf' => 'testtoken',
+    'admin_user' => 'admin',
+    'admin_pass' => 'password123',
+    'admin_pass2' => 'password123',
+    'ns_name' => '主后端',
+    'ns_url' => 'http://127.0.0.1:1337',
+    'ns_secret' => 'topsecret',
+    'lang' => 'zh_cn',
+]);
+@unlink($dir . '/install.lock'); // accounts exist, lock gone: half-installed
+[$out] = runInstaller($dir, 'GET', []);
+check('half-installed panel shows the repair page', str_contains($out, '安装未完成'));
+check('repair page offers a one-click restart', str_contains($out, '重置数据库并重新安装'));
+check('repair page reports the leftover backend', str_contains($out, '含 1 个后端'));
+check('repair page hides the install form', !str_contains($out, 'name="admin_user"'));
+check('repair page does not link to the unusable login', !str_contains($out, '前往登录'));
+
+// --- restart wipes the half-finished database and returns to the wizard --------
+[$out] = runInstaller($dir, 'POST', ['csrf' => 'testtoken', 'action' => 'restart']);
+check('restart wipes the database', !is_file($dir . '/panel.db') && !is_file($dir . '/panel.db-wal'));
+check('restart writes no lock', !is_file($dir . '/install.lock'));
+[$out] = runInstaller($dir, 'GET', []);
+check('after restart the wizard shows again', str_contains($out, '安装 Nightscout 多用户面板') && str_contains($out, 'name="admin_user"'));
+runInstaller($dir, 'POST', [
+    'csrf' => 'testtoken',
+    'admin_user' => 'admin',
+    'admin_pass' => 'password123',
+    'admin_pass2' => 'password123',
+    'ns_name' => '主后端',
+    'ns_url' => 'http://127.0.0.1:1337',
+    'ns_secret' => 'topsecret',
+    'lang' => 'zh_cn',
+]);
+$pdo = db($dir);
+$again = (int)$pdo->query('SELECT COUNT(*) FROM panel_users')->fetchColumn();
+check('a fresh install after restart works end to end', $again === 1 && is_file($dir . '/install.lock'));
+
+// --- a replayed POST after a completed install is refused safely ---------------
+$dir = scenario('replay');
+$valid = [
+    'csrf' => 'testtoken',
+    'admin_user' => 'admin',
+    'admin_pass' => 'password123',
+    'admin_pass2' => 'password123',
+    'ns_name' => '主后端',
+    'ns_url' => 'http://127.0.0.1:1337',
+    'ns_secret' => 'topsecret',
+    'lang' => 'zh_cn',
+];
+runInstaller($dir, 'POST', $valid);
+[$out] = runInstaller($dir, 'POST', $valid); // double click / second tab
+check('replayed POST lands on the installed page', str_contains($out, '已安装'));
+check('replayed POST does not advise deleting the database', !str_contains($out, '删除 data/panel.db'));
+$pdo = db($dir);
+$users = (int)$pdo->query('SELECT COUNT(*) FROM panel_users')->fetchColumn();
+$backends = (int)$pdo->query('SELECT COUNT(*) FROM panel_ns_backends')->fetchColumn();
+check('replayed POST leaves no duplicates', $users === 1 && $backends === 1);
+
+// --- a pasted trailing space in the secret must not survive --------------------
+$dir = scenario('trim-secret');
+runInstaller($dir, 'POST', array_merge($valid, ['ns_secret' => ' topsecret ']));
+check('install with a padded secret still succeeds', is_file($dir . '/install.lock'));
+$verify = $dir . '/verify.php';
+file_put_contents($verify, "<?php\n"
+    . 'define(\'PANEL_DB_FILE\', ' . var_export($dir . '/panel.db', true) . ");\n"
+    . 'require ' . var_export($root . '/vendor/autoload.php', true) . ";\n"
+    . 'echo \\NightPanel\\Backends::secret(\\NightPanel\\Backends::find(1)) === \'topsecret\' ? "TRIMOK" : "TRIMBAD";' . "\n");
+$out = (string)shell_exec('php ' . escapeshellarg($verify) . ' 2>&1');
+check('padded secret is trimmed before storing', str_contains($out, 'TRIMOK'));
+
 // --- cleanup --------------------------------------------------------------------
 foreach (glob($base . '/*') ?: [] as $dir) {
     foreach (glob($dir . '/*') ?: [] as $f) {
