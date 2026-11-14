@@ -20,8 +20,20 @@ class ExceptionHandle extends Handle
 {
     public function render($request, Throwable $e): Response
     {
+        // The Nightscout-compatible API must never answer with an HTML page:
+        // an uploading client parses JSON, and a body it cannot read looks
+        // like a protocol failure rather than a backend outage.
+        $isApi = $request instanceof \think\Request
+            && str_starts_with(ltrim($request->pathinfo(), '/'), 'api/v1/');
+
         if ($e instanceof NsException) {
-            return $this->page('error', t('err.nsUnavailable', ['msg' => $e->getMessage()]), 502);
+            return $isApi
+                ? json([
+                    'status' => 502,
+                    'message' => 'Nightscout unavailable',
+                    'description' => $e->getMessage(),
+                ], 502)
+                : $this->page('error', t('err.nsUnavailable', ['msg' => $e->getMessage()]), 502);
         }
 
         if ($e instanceof HttpException) {
@@ -37,7 +49,9 @@ class ExceptionHandle extends Handle
         // A generic failure can carry anything: SQL fragments, file paths,
         // vendor internals. The framework's report() already logged the
         // detail; the page stays deliberately vague.
-        return $this->page('error', t('err.generic'), 500);
+        return $isApi
+            ? json(['status' => 500, 'message' => 'Internal Server Error', 'description' => 'Internal error'], 500)
+            : $this->page('error', t('err.generic'), 500);
     }
 
     /** Template rendering must never mask the original failure. */

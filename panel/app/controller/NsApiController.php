@@ -46,13 +46,20 @@ class NsApiController extends BaseController
             return $error;
         }
         $single = count($documents) === 1;
+        // Resolved once: a 10000-record batch must not query the profile per row.
+        $tz = ProfileService::timezone($user);
 
         foreach ($documents as &$record) {
             $record['device'] = (string)$user['username'];
             if (!isset($record['date']) && isset($record['dateString'])) {
-                $parsed = strtotime((string)$record['dateString']);
-                if ($parsed !== false) {
-                    $record['date'] = $parsed * 1000;
+                // Uploaders normally send `date` (ms epoch) and only use
+                // dateString for display. When it is the sole timestamp, a
+                // zoneless value belongs to the user's profile timezone, not
+                // whatever the PHP host's clock is set to.
+                try {
+                    $record['date'] = (new \DateTimeImmutable((string)$record['dateString'], $tz))->getTimestamp() * 1000;
+                } catch (\Throwable $unparsable) {
+                    // leave date unset: the backend rejects what it cannot date
                 }
             }
         }
@@ -184,10 +191,18 @@ class NsApiController extends BaseController
 
         $type = null;
         if ($find['type'] !== null) {
-            if ($find['type']['eq'] !== 'sgv' && $find['type']['eq'] !== 'mbg') {
-                return $this->badRequest('find[type] supports sgv or mbg only');
+            $wanted = array_values(array_intersect(
+                $find['type']['in'] ?? [$find['type']['eq'] ?? ''],
+                ['sgv', 'mbg']
+            ));
+            if ($wanted === []) {
+                // Types the mirror never stores (calibrations, for one): an
+                // empty collection is what the backend answers when nothing
+                // matches, and it keeps a polling client working.
+                return $this->jsonOut([]);
             }
-            $type = $find['type']['eq'];
+            // Both types wanted is the same as no filter at all.
+            $type = count($wanted) === 1 ? $wanted[0] : null;
         }
 
         $records = Mirror::apiEntries(

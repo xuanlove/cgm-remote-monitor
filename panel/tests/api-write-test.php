@@ -30,6 +30,8 @@ $cases = [
     'post entries rejects a wrong token' => ['POST', '/api/v1/entries.json', ['api-secret' => 'nope'], '{"sgv":140}', 401, 'Unauthorized', ''],
     'post entries serves the created record' => ['POST', '/api/v1/entries.json', ['api-secret' => 'write-token-1'],
         '{"type":"sgv","sgv":142,"dateString":"2026-11-14T10:00:00+08:00"}', 200, '"sgv":142', ''],
+    'zoneless dateString uses the profile timezone' => ['POST', '/api/v1/entries.json', ['api-secret' => 'write-token-1'],
+        '{"type":"sgv","sgv":160,"dateString":"2026-11-13 10:00:00"}', 200, '"sgv":160', ''],
     'post entries accepts an array' => ['POST', '/api/v1/entries.json', ['api-secret' => 'write-token-1'],
         '[{"type":"sgv","sgv":150,"date":1700000000000},{"type":"mbg","mbg":90,"date":1700000300000}]', 200, '"mbg":90', ''],
     'post entries without a date is a no-op' => ['POST', '/api/v1/entries.json', ['api-secret' => 'write-token-1'],
@@ -46,6 +48,14 @@ $cases = [
         'not-json{', 400, 'Invalid JSON body', ''],
     'scalar payload is refused' => ['POST', '/api/v1/entries.json', ['api-secret' => 'write-token-1'],
         '123', 400, 'Invalid entries payload', ''],
+    // Reads through the same groups, so the mirror just written to is visible.
+    'find[type]=cal answers an empty collection' => ['GET', '/api/v1/entries.json?find[type]=cal',
+        ['api-secret' => 'write-token-1'], '', 200, '[]', ''],
+    'find[type][$in] filters instead of failing' => ['GET', '/api/v1/entries.json?find[type][$in][0]=sgv',
+        ['api-secret' => 'write-token-1'], '', 200, '"sgv":142', '"mbg":90'],
+    // Last: the stub is killed before this one runs (see the parent loop).
+    'a dead backend answers a JSON 502' => ['POST', '/api/v1/entries.json', ['api-secret' => 'write-token-1'],
+        '{"sgv":151,"date":1700000005000}', 502, 'Nightscout unavailable', ''],
 ];
 
 // ---------------------------------------------------------------- child mode
@@ -80,6 +90,14 @@ if ($caseIndex !== false) {
     foreach ($headers as $name => $value) {
         $_SERVER['HTTP_' . strtoupper(str_replace('-', '_', (string)$name))] = (string)$value;
     }
+    // ThinkPHP reads the parsed superglobal: hand it what a web SAPI would
+    // build from the URI's query string.
+    $query = parse_url($uri, PHP_URL_QUERY);
+    $_GET = [];
+    if ($query !== null) {
+        parse_str($query, $_GET);
+    }
+    $_REQUEST = $_GET;
 
     // php://input is not populated from stdin in this CLI build, so the body
     // rides on a manually built Request (withInput is the framework's own
@@ -89,7 +107,9 @@ if ($caseIndex !== false) {
     $app = new \think\App();
     $app->register(\app\AppService::class);
     $response = $app->http->run($request);
-    echo $response->getCode() . "\n" . base64_encode((string)$response->getContent());
+    $ctype = $response->getHeader('Content-Type');
+    echo $response->getCode() . "\n" . base64_encode((string)$response->getContent()) . "\n"
+        . (is_array($ctype) ? implode(',', $ctype) : (string)$ctype);
     exit(0);
 }
 
@@ -128,6 +148,18 @@ $pdo->prepare(
     $backendId,
     \NightPanel\Db::encrypt('write-token-1'),
 ]);
+// The profile timezone decides how zoneless write timestamps are read.
+$pdo->prepare(
+    'INSERT INTO panel_profiles (backend_id, ns_id, start_date, payload) VALUES (?, "p1", ?, ?)'
+)->execute([
+    $backendId,
+    gmdate('c'),
+    json_encode([
+        '_id' => 'p1',
+        'startDate' => gmdate('c'),
+        'store' => ['apitester' => ['dia' => 3, 'timezone' => 'Asia/Shanghai', 'units' => 'mg/dl']],
+    ], JSON_UNESCAPED_SLASHES),
+]);
 
 // Start the stub backend and wait until it accepts connections.
 $pid = (int)shell_exec(
@@ -150,18 +182,25 @@ fclose($stub);
 $stubLog = '';
 
 $index = 0;
+$downRun = false;
 foreach ($cases as $name => $case) {
     [$method, $uri, $headers, $body, $expected, $needle] = $case;
     $absent = (string)($case[6] ?? '');
     $caseIndex = $index++;
 
+    // The dead-backend case needs the stub gone; it runs after the loop.
+    if ($name === 'a dead backend answers a JSON 502') {
+        continue;
+    }
+
     $command = 'PANEL_WRITE_CASE=' . $caseIndex
         . ' PANEL_TEST_DB=' . escapeshellarg($dbFile) . ' '
         . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__FILE__) . ' 2>&1';
     $output = (string)shell_exec($command);
-    $lines = explode("\n", $output, 2);
+    $lines = explode("\n", $output, 3);
     $code = (int)($lines[0] ?? 0);
     $responseBody = base64_decode($lines[1] ?? '', true) ?: '';
+    $ctype = trim((string)($lines[2] ?? ''));
 
     $ok = $code === $expected
         && ($needle === '' || str_contains($responseBody, $needle))
@@ -192,6 +231,16 @@ foreach ($cases as $name => $case) {
         check('created entry landed in the mirror', $row !== false
             && $row['device'] === 'apitester'
             && (int)$row['ts'] === (int)strtotime('2026-11-14T10:00:00+08:00') * 1000);
+    }
+    if ($name === 'zoneless dateString uses the profile timezone') {
+        // A dateString without an offset belongs to the user's profile zone
+        // (Asia/Shanghai below), never the PHP host's default.
+        $sent = (array)(json_decode((string)file_get_contents($logFile), true)[0] ?? []);
+        check(
+            'zoneless dateString interpreted in the profile timezone',
+            ($sent['date'] ?? 0) === strtotime('2026-11-13T10:00:00+08:00') * 1000,
+            'log: ' . (string)file_get_contents($logFile)
+        );
     }
     if ($name === 'post entries accepts an array') {
         $count = (int)$pdo->query(
@@ -228,7 +277,27 @@ $read = (string)shell_exec(
 ) ?: '';
 check('read-after-write serves the uploaded record', $read === '142', 'got ' . $read);
 
+// The backend dies mid-flight: the API must still answer JSON (an uploader
+// cannot parse an HTML error page), and it must say Nightscout is unavailable.
 @shell_exec('kill ' . escapeshellarg((string)$pid));
+usleep(200000);
+$downOutput = (string)shell_exec(
+    'PANEL_WRITE_CASE=' . (array_search('a dead backend answers a JSON 502', array_keys($cases), true))
+    . ' PANEL_TEST_DB=' . escapeshellarg($dbFile) . ' '
+    . escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__FILE__) . ' 2>&1'
+);
+$downLines = explode("\n", $downOutput, 3);
+$downCode = (int)($downLines[0] ?? 0);
+$downBody = base64_decode($downLines[1] ?? '', true) ?: '';
+$downType = trim((string)($downLines[2] ?? ''));
+check(
+    'a dead backend answers a JSON 502',
+    $downCode === 502
+        && str_contains($downBody, 'Nightscout unavailable')
+        && str_contains($downType, 'application/json'),
+    'got ' . $downCode . ' ' . $downType . ', body: ' . substr($downBody, 0, 200)
+);
+
 @unlink($dbFile);
 @unlink($dbFile . '-wal');
 @unlink($dbFile . '-shm');

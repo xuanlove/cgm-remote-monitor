@@ -208,7 +208,7 @@ php bin/sync.php --profiles
 
 | 端点 | 说明 | 参数 |
 |------|------|------|
-| `GET /api/v1/entries.json` | 血糖数组，最新在前（本地镜像） | `count`（默认 10，上限 1000，0 → 空数组）、`find[type]=sgv\|mbg`（缺省合并两类）、`find[date][$gte]/[$lt]`（毫秒）、`find[device]`（标量或 `$in`） |
+| `GET /api/v1/entries.json` | 血糖数组，最新在前（本地镜像） | `count`（默认 10，上限 1000，0 → 空数组）、`find[type]=sgv\|mbg` 或 `find[type][$in][…]`（缺省合并两类；镜像不存的类型如 `cal` 回空数组）、`find[date][$gte]/[$lt]`（毫秒）、`find[device]`（标量或 `$in`） |
 | `GET /api/v1/treatments.json` | 治疗数组，最新在前（本地镜像） | `count`（默认 100，带 find[] 时 1000）、`find[created_at][$gte]/[$lt]`（ISO 时间） |
 | `GET /api/v1/devicestatus.json` | 数组（镜像每账号只存最新一条，至多 1 个元素） | `count` |
 | `GET /api/v1/profile.json` | 档案记录数组，`store` 只含调用者自己的条目 | `count` |
@@ -221,7 +221,7 @@ php bin/sync.php --profiles
 
 - **鉴权**：读 = 面板登录会话 或 `api-secret: <accessToken>` 头；**写 = 仅 `api-secret` 头**（与会话无关，和直连 Nightscout 的规则一致）。只接受请求头，不接受 `?token=` 查询串。
 - **归属强制**：写路径在面板侧注入 `device` / `enteredBy` = 用户名后转发 Nightscout（真相源）并回写本地镜像——调用者无法伪造他人归属。
-- **错误形状与后端一致**：未授权 401 `{status,message:'Unauthorized',description:'Invalid/Missing'}`；非法 payload/未知 `find[]` 过滤键 400（fail-closed，不静默忽略）；限流 120 次/分钟（按 IP），超限 429；Nightscout 不可用时写请求 502。
+- **错误形状与后端一致**：未授权 401 `{status,message:'Unauthorized',description:'Invalid/Missing'}`；非法 payload/未知 `find[]` 过滤键 400（fail-closed，不静默忽略）；限流 120 次/分钟（按 IP），超限 429；Nightscout 不可用时 502，且与 `/api/v1/` 下所有错误一样是 **JSON 形状**（不会返回 HTML 错误页，上传器可正常解析）。
 - **条件请求**：entries/treatments 带 `Last-Modified` 头，`If-Modified-Since` 不早于最新记录时回 304。
 - 未安装时所有端点 302 跳转安装器；裸路径与任意后缀（`.json` 等）都可用——面板的 URL 后缀配置允许任意后缀，均以 JSON 应答。
 - DELETE 路由不在兼容 API 范围内；面板自身的表单写路径（/entry、/treatments 等）不变。
