@@ -1943,6 +1943,197 @@ pre code {
   flex-wrap: wrap;
 }
 
+.deploy-options {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.deploy-option {
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.008));
+}
+
+.deploy-option-tag {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-line);
+  border-radius: 999px;
+  padding: 3px 8px;
+  margin-bottom: 14px;
+}
+
+.deploy-option h3 {
+  font-size: 15.5px;
+  margin-bottom: 8px;
+}
+
+.deploy-option p {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.deploy-cmd {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.6;
+  color: #a9e9cd;
+  background: rgba(4, 10, 16, 0.7);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px 9px;
+  margin-top: 6px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.deploy-detail-grid {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  gap: 18px;
+  align-items: start;
+  margin-top: 18px;
+}
+
+.deploy-side {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.env-card,
+.proxy-card,
+.deploy-checklist {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.006));
+}
+
+.env-card h3,
+.proxy-card h3,
+.deploy-checklist h3 {
+  font-size: 16px;
+  margin-bottom: 8px;
+}
+
+.env-card > p,
+.proxy-card > p {
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+.env-table {
+  margin-top: 16px;
+}
+
+.env-row {
+  display: grid;
+  grid-template-columns: 150px 86px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 9px 0;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.env-head {
+  border-top: 0;
+  padding-top: 0;
+  padding-bottom: 7px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.env-row code {
+  font-size: 10px;
+  padding: 1px 4px;
+  color: #c9ecdd;
+  white-space: nowrap;
+  overflow-wrap: anywhere;
+}
+
+.env-req {
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--amber);
+}
+
+.env-default {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--faint);
+}
+
+.proxy-card .code-window {
+  margin-top: 14px;
+}
+
+.proxy-card pre {
+  padding: 16px 18px;
+  font-size: 10.5px;
+  line-height: 1.7;
+}
+
+.proxy-note {
+  margin-top: 12px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--faint);
+}
+
+.proxy-note code {
+  font-size: 0.85em;
+}
+
+.deploy-checklist ul {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin-top: 12px;
+}
+
+.deploy-checklist li {
+  position: relative;
+  padding-left: 20px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.deploy-checklist li::before {
+  content: "✓";
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.deploy-checklist code {
+  font-size: 0.85em;
+}
+
 /* ---------- Notice ---------- */
 
 .notice {
@@ -2090,6 +2281,10 @@ pre code {
     grid-template-columns: repeat(2, 1fr);
   }
 
+  .deploy-options {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
   .stat {
     padding: 26px 20px;
   }
@@ -2171,6 +2366,10 @@ pre code {
   }
 
   .ops-card {
+    grid-template-columns: 1fr;
+  }
+
+  .deploy-detail-grid {
     grid-template-columns: 1fr;
   }
 
@@ -2303,6 +2502,31 @@ pre code {
 
   .ops-card {
     padding: 18px;
+  }
+
+  .deploy-options {
+    grid-template-columns: 1fr;
+  }
+
+  .deploy-option,
+  .env-card,
+  .proxy-card,
+  .deploy-checklist {
+    padding: 20px 18px;
+  }
+
+  .env-head {
+    display: none;
+  }
+
+  .env-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 4px 10px;
+    padding: 10px 0;
+  }
+
+  .env-row > span:last-child {
+    grid-column: 1 / -1;
   }
 
   .stats-band .stat {
