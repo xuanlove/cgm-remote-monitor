@@ -443,6 +443,183 @@
           </article>
         </div>
 
+        <div class="arch-card reveal">
+          <div class="arch-head">
+            <div>
+              <h3 data-i18n="panel.arch.title">Architecture &amp; data flow</h3>
+              <p data-i18n="panel.arch.body">The web tier only reads SQLite. Writes go to the Nightscout API, and a scheduled sync keeps the mirror current; Nightscout and MongoDB remain the source of truth.</p>
+            </div>
+            <div class="arch-legend" aria-hidden="true">
+              <span><i class="arch-dot arch-dot-read"></i><span data-i18n="panel.arch.read">Web read path</span></span>
+              <span><i class="arch-dot arch-dot-write"></i><span data-i18n="panel.arch.write">Write path</span></span>
+              <span><i class="arch-dot arch-dot-sync"></i><span data-i18n="panel.arch.sync">Background sync</span></span>
+            </div>
+          </div>
+          <div class="arch-scroll">
+            <div class="arch-figure" role="img" aria-label="NightPanel architecture" data-i18n-aria="panel.arch.aria">
+              <svg class="arch-svg" viewBox="0 0 1000 436" aria-hidden="true">
+                <defs>
+                  <marker id="arrowRead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M0 0 10 5 0 10Z" fill="#2ee6a8"/>
+                  </marker>
+                  <marker id="arrowWrite" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M0 0 10 5 0 10Z" fill="#f7b955"/>
+                  </marker>
+                  <marker id="arrowSync" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M0 0 10 5 0 10Z" fill="#5aa9ff"/>
+                  </marker>
+                </defs>
+
+                <!-- Clients -->
+                <rect class="arch-box" x="24" y="56" width="180" height="120" rx="10"/>
+                <text class="arch-kicker" x="40" y="78">CLIENTS</text>
+                <text class="arch-title" x="40" y="102">Caregivers</text>
+                <text class="arch-line" x="40" y="124">Browsers · dashboards</text>
+                <text class="arch-line" x="40" y="140">xDrip+ · Loop · AAPS</text>
+
+                <!-- Edge -->
+                <rect class="arch-box" x="248" y="56" width="160" height="120" rx="10"/>
+                <text class="arch-kicker" x="264" y="78">EDGE</text>
+                <text class="arch-title" x="264" y="102">nginx / Apache</text>
+                <text class="arch-line" x="264" y="124">php-fpm</text>
+                <text class="arch-line" x="264" y="140">TLS termination</text>
+
+                <!-- NightPanel -->
+                <rect class="arch-box arch-box-primary" x="456" y="34" width="214" height="164" rx="10"/>
+                <text class="arch-kicker arch-kicker-accent" x="472" y="56">APPLICATION</text>
+                <text class="arch-title" x="472" y="82">NightPanel</text>
+                <text class="arch-line" x="472" y="104">ThinkPHP 8</text>
+                <text class="arch-line" x="472" y="120">middleware · controllers</text>
+                <text class="arch-line" x="472" y="136">services</text>
+                <text class="arch-line" x="472" y="152">scoped tokens · CSRF</text>
+
+                <!-- SQLite -->
+                <rect class="arch-box" x="716" y="56" width="180" height="120" rx="10"/>
+                <text class="arch-kicker" x="732" y="78">LOCAL STORE</text>
+                <text class="arch-title" x="732" y="102">SQLite mirror</text>
+                <text class="arch-line" x="732" y="124">panel_entries</text>
+                <text class="arch-line" x="732" y="140">panel_treatments</text>
+                <text class="arch-line" x="732" y="156">panel_profiles</text>
+
+                <!-- Nightscout API -->
+                <rect class="arch-box" x="560" y="286" width="196" height="120" rx="10"/>
+                <text class="arch-kicker" x="576" y="308">SOURCE OF TRUTH</text>
+                <text class="arch-title" x="576" y="332">Nightscout API</text>
+                <text class="arch-line" x="576" y="354">per-user token</text>
+                <text class="arch-line" x="576" y="370">writes proxied</text>
+                <text class="arch-line" x="576" y="386">REST v1</text>
+
+                <!-- MongoDB -->
+                <rect class="arch-box" x="806" y="286" width="170" height="120" rx="10"/>
+                <text class="arch-kicker" x="822" y="308">DATABASE</text>
+                <text class="arch-title" x="822" y="332">MongoDB</text>
+                <text class="arch-line" x="822" y="354">entries · treatments</text>
+                <text class="arch-line" x="822" y="370">devicestatus · profiles</text>
+
+                <!-- Cron -->
+                <rect class="arch-box" x="24" y="300" width="300" height="100" rx="10"/>
+                <text class="arch-kicker" x="40" y="322">BACKGROUND</text>
+                <text class="arch-title" x="40" y="346">cron / systemd</text>
+                <text class="arch-line" x="40" y="368">sync.php every 60 s</text>
+                <text class="arch-line" x="40" y="384">6 h overlap · idempotent upsert</text>
+
+                <!-- Read arrows -->
+                <path class="arch-arrow arch-arrow-read" d="M204 116 H244" marker-end="url(#arrowRead)"/>
+                <text class="arch-arrow-label" x="224" y="105">HTTPS</text>
+                <path class="arch-arrow arch-arrow-read" d="M408 116 H452" marker-end="url(#arrowRead)"/>
+                <text class="arch-arrow-label" x="430" y="105">FastCGI</text>
+                <path class="arch-arrow arch-arrow-read" d="M670 116 H712" marker-end="url(#arrowRead)"/>
+                <text class="arch-arrow-label" x="691" y="105">SELECT</text>
+
+                <!-- Write arrows -->
+                <path class="arch-arrow arch-arrow-write" d="M620 198 V282" marker-end="url(#arrowWrite)"/>
+                <text class="arch-arrow-label arch-arrow-label-write arch-arrow-label-start" x="632" y="244">REST writes</text>
+                <path class="arch-arrow arch-arrow-write" d="M756 346 H802" marker-end="url(#arrowWrite)"/>
+                <text class="arch-arrow-label arch-arrow-label-write" x="779" y="335">persist</text>
+
+                <!-- Sync arrows -->
+                <path class="arch-arrow arch-arrow-sync" d="M324 350 H556" marker-end="url(#arrowSync)"/>
+                <text class="arch-arrow-label arch-arrow-label-sync" x="440" y="339">incremental sync</text>
+                <path class="arch-arrow arch-arrow-sync" d="M744 286 C762 244 788 210 812 182" marker-end="url(#arrowSync)"/>
+                <text class="arch-arrow-label arch-arrow-label-sync arch-arrow-label-start" x="792" y="228">upsert</text>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <div class="tech-grid">
+          <article class="tech-card reveal">
+            <h3><span class="tech-num">01</span><span data-i18n="panel.t1.title">Security &amp; tenant isolation</span></h3>
+            <ul class="tech-list">
+              <li data-i18n-html="panel.t1.b1">Web pages read only the local mirror; write forms are CSRF-guarded and proxied to Nightscout.</li>
+              <li data-i18n-html="panel.t1.b2">Scoped tokens allow profile read, write and create for the caller's own <code>store[&lt;username&gt;]</code>, read of their own device's entries, and create-only access to entries, treatments and devicestatus.</li>
+              <li data-i18n-html="panel.t1.b3">Attribution is enforced server-side: <code>device=&lt;username&gt;</code> on entries, <code>enteredBy=&lt;username&gt;</code> on treatments.</li>
+              <li data-i18n-html="panel.t1.b4">Backend API secrets are encrypted with AES-256-GCM; the installer writes <code>install.lock</code> and the panel needs no environment variables.</li>
+            </ul>
+          </article>
+
+          <article class="tech-card reveal" data-delay="60">
+            <h3><span class="tech-num">02</span><span data-i18n="panel.t2.title">Sync engine &amp; storage</span></h3>
+            <ul class="tech-list">
+              <li data-i18n-html="panel.t2.b1">A per-user, per-stream millisecond cursor lives in <code>panel_sync_state</code>; every pull re-reads a 6-hour overlap so late uploads are not missed.</li>
+              <li data-i18n-html="panel.t2.b2">Records are upserted idempotently by Nightscout <code>_id</code>; a 30-day full recalibration repairs cursor drift.</li>
+              <li data-i18n-html="panel.t2.b3">Pages read <code>panel_entries</code>, <code>panel_treatments</code>, <code>panel_devicestatus</code> and <code>panel_profiles</code>.</li>
+              <li data-i18n-html="panel.t2.b4">Retention defaults: glucose 120 days, treatments 365, logs 7, alert events 30.</li>
+            </ul>
+          </article>
+
+          <article class="tech-card reveal">
+            <h3><span class="tech-num">03</span><span data-i18n="panel.t3.title">Nightscout-compatible API</span></h3>
+            <ul class="tech-list">
+              <li data-i18n-html="panel.t3.b1">Reads: <code>/api/v1/entries.json</code>, <code>treatments.json</code>, <code>devicestatus.json</code>, <code>profile.json</code>, <code>profile/current</code> and <code>status.json</code>.</li>
+              <li data-i18n-html="panel.t3.b2">Writes: <code>POST</code> entries, treatments and devicestatus, plus <code>PUT profile.json</code>; point uploaders at <code>https://panel.example.com/api/v1/</code>.</li>
+              <li data-i18n-html="panel.t3.b3">Reads accept a session or <code>api-secret</code>; writes require <code>api-secret</code>. Limits: 120 requests/min per IP, JSON errors for 401, 400, 429 and 502.</li>
+              <li data-i18n-html="panel.t3.b4">Entries and treatments support <code>Last-Modified</code> / <code>If-Modified-Since</code> and answer <code>304</code> when unchanged.</li>
+            </ul>
+          </article>
+
+          <article class="tech-card reveal" data-delay="60">
+            <h3><span class="tech-num">04</span><span data-i18n="panel.t4.title">Deployment &amp; operations</span></h3>
+            <ul class="tech-list">
+              <li data-i18n-html="panel.t4.b1">Serve <code>panel/public</code> behind nginx or Apache with php-fpm; <code>app/</code>, <code>config/</code>, <code>runtime/</code>, <code>vendor/</code> and <code>data/</code> stay outside the document root.</li>
+              <li data-i18n-html="panel.t4.b2">PHP 8.1+ with curl, openssl, pdo_sqlite and sqlite3; Composer 2; OPcache recommended.</li>
+              <li data-i18n-html="panel.t4.b3"><code>/install.php</code> creates the admin, encryption seed, default language and first backend, then locks itself.</li>
+              <li data-i18n-html="panel.t4.b4">The admin area adds or tests backends, suspends registration by disabling a backend, deletes users, and migrates accounts between backends idempotently.</li>
+            </ul>
+          </article>
+        </div>
+
+        <div class="ops-card reveal">
+          <div class="ops-copy">
+            <h3 data-i18n="panel.ops.title">Scheduled jobs</h3>
+            <p data-i18n="panel.ops.note">Run as the php-fpm user. The SQLite database must stay outside the web root.</p>
+            <div class="ops-warn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 3.5 21 20H3L12 3.5Z"/>
+                <path d="M12 9v5M12 17.2v.1"/>
+              </svg>
+              <span data-i18n-html="panel.ops.warn">Set <code>AUTH_DEFAULT_ROLES=denied</code> on every Nightscout backend — the default <code>readable</code> role would otherwise expose data.</span>
+            </div>
+          </div>
+          <div class="code-window ops-code">
+            <div class="code-head">
+              <span class="code-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="code-file">crontab</span>
+            </div>
+            <pre><code><span class="tok-comment"># incremental sync, every minute</span>
+* * * * *   php /var/www/cgm-remote-monitor/panel/bin/sync.php
+
+<span class="tok-comment"># profile snapshot, every 15 minutes</span>
+*/15 * * * * php /var/www/cgm-remote-monitor/panel/bin/sync.php --profiles
+
+<span class="tok-comment"># 30-day recalibration, daily at 03:05</span>
+5 3 * * *    php /var/www/cgm-remote-monitor/panel/bin/sync.php --full --days=30
+
+<span class="tok-comment"># retention cleanup, daily at 03:30</span>
+30 3 * * *   php /var/www/cgm-remote-monitor/panel/bin/cleanup.php</code></pre>
+          </div>
+        </div>
+
         <div class="panel-req reveal">
           <span class="panel-req-label" data-i18n="panel.reqLabel">Runs on</span>
           <span class="chip">PHP 8.1+</span>
@@ -774,6 +951,7 @@ npm start
   </footer>
 
   <script src="translations.js"></script>
+  <script src="translations-panel.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
