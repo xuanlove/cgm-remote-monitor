@@ -1,0 +1,129 @@
+{extend name="layout/base" /}
+{block name="content"}
+<h1>{:t('adm.title')}</h1>
+
+{notempty name="error"}<p class="msg-bad">{$error}</p>{/notempty}
+{notempty name="notice"}<p class="msg-ok">{$notice}</p>{/notempty}
+
+<div class="card">
+  <h1 style="font-size:16px;">{:t('admin.backendsTitle')}</h1>
+  {if condition="empty($backends)"}
+    <p class="hint">{:t('admin.backendsEmpty')}</p>
+  {else /}
+    <table>
+      <thead><tr>
+        <th>{:t('admin.col.name')}</th>
+        <th>{:t('admin.col.url')}</th>
+        <th>{:t('admin.col.users')}</th>
+        <th>{:t('admin.col.enabled')}</th>
+        <th>{:t('col.actions')}</th>
+      </tr></thead>
+      <tbody>
+      {foreach $backends as $b}
+        <tr>
+          <td>{$b.name}</td>
+          <td><code>{$b.url}</code></td>
+          <td>{$b.user_count}</td>
+          <td>{if condition="$b['enabled'] == 1"}{:t('admin.enabled')}{else /}<span class="hint">{:t('admin.disabled')}</span>{/if}</td>
+          <td style="white-space:nowrap;">
+            <form method="post" action="/admin/backends/test" style="display:inline;">
+              <input type="hidden" name="csrf" value="{$csrf}">
+              <input type="hidden" name="id" value="{$b.id}">
+              <button style="margin:0;padding:4px 10px;">{:t('admin.test')}</button>
+            </form>
+            <form method="post" action="/admin/backends/toggle" style="display:inline;">
+              <input type="hidden" name="csrf" value="{$csrf}">
+              <input type="hidden" name="id" value="{$b.id}">
+              <button style="margin:0;padding:4px 10px;">
+                {if condition="$b['enabled'] == 1"}{:t('admin.toggleDisable')}{else /}{:t('admin.toggleEnable')}{/if}
+              </button>
+            </form>
+            {if condition="$b['user_count'] == 0"}
+            <form method="post" action="/admin/backends/delete" style="display:inline;"
+                  onsubmit="return confirm('{:t_html('admin.confirmDelete', ['name' => $b['name']])}')">
+              <input type="hidden" name="csrf" value="{$csrf}">
+              <input type="hidden" name="id" value="{$b.id}">
+              <button class="danger" style="margin:0;padding:4px 10px;">{:t('admin.delete')}</button>
+            </form>
+            {/if}
+          </td>
+        </tr>
+        <tr>
+          <td colspan="5" style="border-bottom:1px solid var(--line);">
+            <details>
+              <summary class="hint" style="cursor:pointer;">{:t('admin.edit')}</summary>
+              <form method="post" action="/admin/backends/save" style="max-width:560px;">
+                <input type="hidden" name="csrf" value="{$csrf}">
+                <input type="hidden" name="id" value="{$b.id}">
+                <div class="grid">
+                  <div><label>{:t('admin.name')}</label><input name="name" value="{$b.name}" required></div>
+                  <div><label>{:t('admin.url')}</label><input name="url" value="{$b.url}" required></div>
+                </div>
+                <label>{:t('admin.secret')}（{:t('admin.secretKeep')}）</label>
+                <input name="secret" type="password" autocomplete="new-password">
+                <button style="margin:0;padding:4px 10px;">{:t('admin.save')}</button>
+              </form>
+            </details>
+          </td>
+        </tr>
+      {/foreach}
+      </tbody>
+    </table>
+  {/if}
+
+  <details style="margin-top:12px;">
+    <summary style="cursor:pointer;font-weight:bold;">{:t('admin.addTitle')}</summary>
+    <form method="post" action="/admin/backends/add" style="max-width:560px;">
+      <input type="hidden" name="csrf" value="{$csrf}">
+      <div class="grid">
+        <div><label>{:t('admin.name')}</label><input name="name" required placeholder="nightscout-1"></div>
+        <div><label>{:t('admin.url')}</label><input name="url" required placeholder="https://ns1.example.com"></div>
+      </div>
+      <label>{:t('admin.secret')}</label>
+      <input name="secret" type="password" required autocomplete="new-password">
+      <button>{:t('admin.add')}</button>
+    </form>
+  </details>
+
+  <p style="margin-top:16px;">
+    <a href="/admin/migrate" style="color:var(--accent);">{:t('admin.migrateLink')}</a>
+    <span class="hint"> · {:t('admin.migrateLinkHint')}</span>
+  </p>
+</div>
+
+<div class="card">
+  <h1 style="font-size:16px;">{:t_html('adm.users', ['n' => count($users)])}</h1>
+  <table>
+    <thead><tr>
+      <th>{:t('adm.col.id')}</th>
+      <th>{:t('adm.col.username')}</th>
+      <th>{:t('adm.col.role')}</th>
+      <th>{:t('adm.col.backend')}</th>
+      <th>{:t('adm.col.subject')}</th>
+      <th>{:t('adm.col.createdAt')}</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+    {foreach $users as $u}
+      <tr>
+        <td>{$u.id}</td>
+        <td><code>{$u.username}</code></td>
+        <td>{$u.role}</td>
+        <td>{$u['backend_name']|default='-'}</td>
+        <td class="hint">{$u['ns_subject_id']|default='-'}</td>
+        <td class="hint">{$u.created_at}</td>
+        <td>
+          {if condition="$u['role'] !== 'admin'"}
+          <form method="post" action="/admin/users/delete" onsubmit="return confirm('{:t_html('adm.confirmDelete', ['name' => $u['username']])}')">
+            <input type="hidden" name="csrf" value="{$csrf}">
+            <input type="hidden" name="id" value="{$u.id}">
+            <button class="danger" style="margin:0;padding:4px 10px;">{:t('adm.delete')}</button>
+          </form>
+          {/if}
+        </td>
+      </tr>
+    {/foreach}
+    </tbody>
+  </table>
+</div>
+{/block}

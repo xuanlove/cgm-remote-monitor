@@ -1,0 +1,36 @@
+{extend name="layout/base" /}
+{block name="content"}
+<div class="card" style="max-width:640px;margin:40px auto;">
+  <h1>{:t('admin.migrateTitle')}</h1>
+  {notempty name="error"}<p class="msg-bad">{$error}</p>{/notempty}
+
+  {if condition="count($backends) < 2"}
+    <p class="hint">{:t('admin.migrateNeedTwo')}</p>
+  {else /}
+    <form method="post" action="/admin/migrate/confirm">
+      <input type="hidden" name="csrf" value="{$csrf}">
+      <label>{:t('admin.migrateFrom')}</label>
+      <select name="from" required>
+        <option value=""></option>
+        {foreach $backends as $b}
+          <option value="{$b.id}">{$b.name}（{:t_html('admin.migrateUserCount', ['n' => $b['user_count']])}）</option>
+        {/foreach}
+      </select>
+      <label>{:t('admin.migrateTo')}</label>
+      <select name="to" required>
+        <option value=""></option>
+        {foreach $backends as $b}
+          <option value="{$b.id}">{$b.name}</option>
+        {/foreach}
+      </select>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:14px;">
+        <input type="checkbox" name="cleanup" value="1" style="width:auto;">
+        <span>{:t('admin.migrateCleanup')}</span>
+      </label>
+      <p class="hint">{:t('admin.migrateCleanupHint')}</p>
+      <button>{:t('admin.migrateSubmit')}</button>
+    </form>
+  {/if}
+  <p><a href="/admin/users" style="color:var(--accent);">{:t('admin.migrateCancel')}</a></p>
+</div>
+{/block}
